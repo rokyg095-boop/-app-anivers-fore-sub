@@ -1,0 +1,347 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net - Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Global Reusable Hardened Helpers
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() && (
+        request.auth.token.email == 'rokyg095@gmail.com'
+        || exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // Validation Blueprint: EpisodeSource
+    function isValidEpisodeSource(data, episodeId) {
+      return data.keys().hasAll([
+          'episodeId',
+          'driveLink',
+          'videoUrl',
+          'isPublic',
+          'updatedByUid',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'episodeId',
+          'driveLink',
+          'videoUrl',
+          'accountLabel',
+          'backupDriveLinks',
+          'subtitles',
+          'isPublic',
+          'updatedByUid',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.episodeId is string
+        && data.episodeId.size() >= 1
+        && data.episodeId.size() <= 128
+        && data.episodeId == episodeId
+        && data.driveLink is string
+        && data.driveLink.size() <= 1000
+        && data.videoUrl is string
+        && data.videoUrl.size() <= 1000
+        && (!('accountLabel' in data) || (data.accountLabel is string && data.accountLabel.size() <= 120))
+        && (!('backupDriveLinks' in data) || (
+          data.backupDriveLinks is list
+          && data.backupDriveLinks.size() <= 10
+          && (data.backupDriveLinks.size() == 0 || data.backupDriveLinks[0] is map)
+        ))
+        && (!('subtitles' in data) || (
+          data.subtitles is list
+          && data.subtitles.size() <= 10
+          && (data.subtitles.size() == 0 || data.subtitles[0] is map)
+        ))
+        && data.isPublic is bool
+        && data.isPublic == true
+        && data.updatedByUid is string
+        && data.updatedByUid.size() >= 1
+        && data.updatedByUid.size() <= 128
+        && data.updatedByUid == request.auth.uid
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: CustomWork
+    function isValidCustomWork(data, workId) {
+      return data.keys().hasAll([
+          'workId',
+          'category',
+          'title',
+          'originalTitle',
+          'coverImage',
+          'bannerImage',
+          'genres',
+          'dubStudio',
+          'rating',
+          'seasonsCount',
+          'episodesCount',
+          'synopsis',
+          'isPublic',
+          'updatedByUid',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'workId',
+          'category',
+          'title',
+          'originalTitle',
+          'coverImage',
+          'bannerImage',
+          'genres',
+          'dubStudio',
+          'rating',
+          'seasonsCount',
+          'episodesCount',
+          'synopsis',
+          'isPublic',
+          'updatedByUid',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.workId is string
+        && data.workId.size() >= 1
+        && data.workId.size() <= 128
+        && data.workId == workId
+        && data.category is string
+        && data.category.size() >= 1
+        && data.category.size() <= 20
+        && (data.category == 'anime' || data.category == 'movie' || data.category == 'dubbed')
+        && data.title is string
+        && data.title.size() >= 1
+        && data.title.size() <= 200
+        && data.originalTitle is string
+        && data.originalTitle.size() <= 200
+        && data.coverImage is string
+        && data.coverImage.size() >= 1
+        && data.coverImage.size() <= 400000
+        && data.bannerImage is string
+        && data.bannerImage.size() <= 400000
+        && data.genres is list
+        && data.genres.size() >= 1
+        && data.genres.size() <= 8
+        && data.genres[0] is string
+        && data.dubStudio is string
+        && data.dubStudio.size() <= 120
+        && data.rating is number
+        && data.rating >= 0
+        && data.rating <= 10
+        && data.seasonsCount is int
+        && data.seasonsCount >= 1
+        && data.seasonsCount <= 30
+        && data.episodesCount is int
+        && data.episodesCount >= 1
+        && data.episodesCount <= 300
+        && data.synopsis is string
+        && data.synopsis.size() >= 1
+        && data.synopsis.size() <= 4000
+        && data.isPublic is bool
+        && data.isPublic == true
+        && data.updatedByUid is string
+        && data.updatedByUid.size() >= 1
+        && data.updatedByUid.size() <= 128
+        && data.updatedByUid == request.auth.uid
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: SiteAccessGate
+    function isValidAccessGate(data, settingId) {
+      return data.keys().hasAll([
+          'settingId',
+          'enabled',
+          'passcodeHash',
+          'gateVersion',
+          'isPublic',
+          'updatedByUid',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'settingId',
+          'enabled',
+          'passcodeHash',
+          'gateVersion',
+          'isPublic',
+          'updatedByUid',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.settingId is string
+        && data.settingId.size() >= 1
+        && data.settingId.size() <= 64
+        && data.settingId == 'accessGate'
+        && settingId == 'accessGate'
+        && data.enabled is bool
+        && data.passcodeHash is string
+        && data.passcodeHash.size() == 64
+        && data.passcodeHash.matches('^[a-f0-9]{64}$')
+        && data.gateVersion is int
+        && data.gateVersion >= 1
+        && data.gateVersion <= 1000000
+        && data.isPublic is bool
+        && data.isPublic == true
+        && data.updatedByUid is string
+        && data.updatedByUid.size() >= 1
+        && data.updatedByUid.size() <= 128
+        && data.updatedByUid == request.auth.uid
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: AdminUser
+    function isValidAdminUser(data, userId) {
+      return data.keys().hasAll(['uid', 'role', 'createdAt'])
+        && data.keys().hasOnly(['uid', 'role', 'createdAt'])
+        && data.uid is string
+        && data.uid.size() >= 1
+        && data.uid.size() <= 128
+        && data.uid == userId
+        && data.role is string
+        && data.role.size() >= 1
+        && data.role.size() <= 20
+        && data.role == 'admin'
+        && data.createdAt is timestamp;
+    }
+
+    // Public catalog streaming links (readable by all visitors; writable ONLY by verified admins)
+    match /episodeSources/{episodeId} {
+      allow get: if isValidId(episodeId) && (isAdmin() || (resource != null && existing().isPublic == true));
+      allow list: if resource.data.isPublic == true;
+
+      allow create: if isAdmin()
+        && isValidId(episodeId)
+        && isValidEpisodeSource(incoming(), episodeId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isAdmin()
+        && isValidEpisodeSource(incoming(), episodeId)
+        && isValidId(episodeId)
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'driveLink',
+            'videoUrl',
+            'accountLabel',
+            'backupDriveLinks',
+            'subtitles',
+            'updatedByUid',
+            'updatedAt'
+          ])
+        );
+
+      allow delete: if isAdmin() && isValidId(episodeId);
+    }
+
+    // Admin-created catalog works (anime, movies, dubbed series)
+    match /customWorks/{workId} {
+      allow get: if isValidId(workId) && (isAdmin() || (resource != null && existing().isPublic == true));
+      allow list: if resource.data.isPublic == true;
+
+      allow create: if isAdmin()
+        && isValidId(workId)
+        && isValidCustomWork(incoming(), workId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isAdmin()
+        && isValidCustomWork(incoming(), workId)
+        && isValidId(workId)
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'category',
+            'title',
+            'originalTitle',
+            'coverImage',
+            'bannerImage',
+            'genres',
+            'dubStudio',
+            'rating',
+            'seasonsCount',
+            'episodesCount',
+            'synopsis',
+            'updatedByUid',
+            'updatedAt'
+          ])
+        );
+
+      allow delete: if isAdmin() && isValidId(workId);
+    }
+
+    // Site entry access gate (hashed passcode check for visitors; writable ONLY by verified admins)
+    match /siteSettings/{settingId} {
+      allow get: if settingId == 'accessGate' && (isAdmin() || resource == null || existing().isPublic == true);
+      allow list: if false;
+
+      allow create: if isAdmin()
+        && isValidId(settingId)
+        && isValidAccessGate(incoming(), settingId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isAdmin()
+        && isValidAccessGate(incoming(), settingId)
+        && isValidId(settingId)
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'enabled',
+          'passcodeHash',
+          'gateVersion',
+          'updatedByUid',
+          'updatedAt'
+        ]);
+
+      allow delete: if isAdmin() && settingId == 'accessGate';
+    }
+
+    // Admin registry (admin-only read/write, no self-promotion)
+    match /admins/{userId} {
+      allow get: if isAdmin() && isValidId(userId);
+      allow list: if isAdmin() && resource.data.role == 'admin';
+
+      allow create: if isAdmin()
+        && isValidId(userId)
+        && isValidAdminUser(incoming(), userId)
+        && incoming().createdAt == request.time;
+
+      allow update: if isAdmin()
+        && isValidAdminUser(incoming(), userId)
+        && isValidId(userId)
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly(['role']);
+
+      allow delete: if isAdmin() && isValidId(userId) && userId != request.auth.uid;
+    }
+  }
+}

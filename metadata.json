@@ -1,0 +1,6 @@
+{
+  "name": "AniVerse - عالم الكوميكس والدبلجة",
+  "description": "منصة عربية احترافية ومتجاوبة لعرض وقراءة الكوميكس التفاعلي ومشاهدة الأعمال المدبلجة بجودة عالية مع مشغل فيديو متطور.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

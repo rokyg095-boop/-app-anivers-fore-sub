@@ -1,0 +1,1141 @@
+import {
+  getAdventureTimeAllSeasons,
+  AVATAR_ALL_SEASONS,
+  FIONNA_CAKE_ALL_SEASONS,
+  AMPHIBIA_ALL_SEASONS,
+  DISTANT_LANDS_ALL_SEASONS,
+} from './dubbedSeasonsData';
+import { NARUTO_ALL_SEASONS } from './narutoData';
+
+export interface ComicChapter {
+  id: string;
+  chapterNumber: number;
+  title: string;
+  pagesCount: number;
+  releaseDate: string;
+  pages: string[];
+}
+
+export interface Comic {
+  id: string;
+  title: string;
+  originalTitle: string;
+  coverImage: string;
+  bannerImage: string;
+  author: string;
+  artist: string;
+  arabicTranslator: string;
+  arabicLetterer: string;
+  arabicPublisher: string;
+  genres: string[];
+  status: 'مستمر' | 'مكتمل';
+  rating: number;
+  views: string;
+  synopsis: string;
+  chapters: ComicChapter[];
+}
+
+export interface SubtitleTrack {
+  id: string;
+  lang: 'ar' | 'en' | string;
+  label: string;
+  src: string;
+  default?: boolean;
+}
+
+export interface DubEpisode {
+  id: string;
+  episodeNumber: number;
+  title: string;
+  duration: string;
+  thumbnail: string;
+  videoUrl: string;
+  driveLink?: string;
+  subtitles?: SubtitleTrack[];
+  dubStudio: string;
+  voiceActors: string[];
+  releaseDate: string;
+  description: string;
+  isComingSoon?: boolean;
+}
+
+export interface DubSeason {
+  id: string;
+  seasonNumber: number;
+  title: string;
+  description?: string;
+  episodesCount: number;
+  episodes: DubEpisode[];
+}
+
+export interface DubSeries {
+  id: string;
+  title: string;
+  originalTitle: string;
+  coverImage: string;
+  bannerImage: string;
+  genres: string[];
+  dubStudio: string;
+  director: string;
+  rating: number;
+  episodesCount: number;
+  synopsis: string;
+  seasons: DubSeason[];
+  episodes: DubEpisode[];
+  category?: 'dubbed' | 'anime' | 'movie';
+}
+
+// 1. Pages for "أكرهك، أرجوك مت!" (I Hate You, Please Die!) - EXACT 36 pages provided by user
+export const HATE_YOU_PAGES: string[] = [
+  '/assets/aistudio/IHYPD01_01_1b968151.jpg',
+  '/assets/aistudio/IHYPD01_02_2d535ed2.jpg',
+  '/assets/aistudio/IHYPD01_03_5a05baa4.jpg',
+  '/assets/aistudio/IHYPD01_04_44e7b770.jpg',
+  '/assets/aistudio/IHYPD01_05_e7fa3253.jpg',
+  '/assets/aistudio/IHYPD01_06_3d56365b.jpg',
+  '/assets/aistudio/IHYPD01_07_547c983a.jpg',
+  '/assets/aistudio/IHYPD01_08_556796cc.jpg',
+  '/assets/aistudio/IHYPD01_09_537910fb.jpg',
+  '/assets/aistudio/IHYPD01_10_30295255.jpg',
+  '/assets/aistudio/IHYPD01_11_77b1d0a9.jpg',
+  '/assets/aistudio/IHYPD01_12_8cd7fee0.jpg',
+  '/assets/aistudio/IHYPD01_14_5584948a.jpg',
+  '/assets/aistudio/IHYPD01_15_ec8ad707.jpg',
+  '/assets/aistudio/IHYPD01_16_2f8ef7fd.jpg',
+  '/assets/aistudio/IHYPD01_17_fa97bd28.jpg',
+  '/assets/aistudio/IHYPD01_18_78dd81bf.jpg',
+  '/assets/aistudio/IHYPD01_19_e2eb6a6d.jpg',
+  '/assets/aistudio/IHYPD01_20_b301bea6.jpg',
+  '/assets/aistudio/IHYPD01_21_8520da61.jpg',
+  '/assets/aistudio/IHYPD01_22_41a5d01e.jpg',
+  '/assets/aistudio/IHYPD01_23_8cf11ccb.jpg',
+  '/assets/aistudio/IHYPD01_24_d3ecf67f.jpg',
+  '/assets/aistudio/IHYPD01_25_fa8bff25.jpg',
+  '/assets/aistudio/IHYPD01_26_90a4f8b0.jpg',
+  '/assets/aistudio/IHYPD01_27_19e4f933.jpg',
+  '/assets/aistudio/IHYPD01_28_6d44d61f.jpg',
+  '/assets/aistudio/IHYPD01_29_27ba74bb.jpg',
+  '/assets/aistudio/IHYPD01_30_0b83179a.jpg',
+  '/assets/aistudio/IHYPD01_31_411b70af.jpg',
+  '/assets/aistudio/IHYPD01_32_64adb9e0.jpg',
+  '/assets/aistudio/IHYPD01_33_4d0460c4.jpg',
+  '/assets/aistudio/IHYPD01_34_f3ae19c4.jpg',
+  '/assets/aistudio/IHYPD01_35_daa6f3a2.jpg',
+  '/assets/aistudio/IHYPD01_36_f558b1fb.jpg',
+  '/assets/aistudio/IHYPD01_37_2b9e3634.jpg',
+];
+
+// 2. Pages for "وقت المغامرة مع فين وجيك" (Adventure Time with Finn & Jake) - EXACT 18 pages provided by user
+export const ADVENTURE_TIME_PAGES: string[] = [
+  '/assets/aistudio/01_b8ba92cf.JPG',
+  '/assets/aistudio/02_37fc099b.JPG',
+  '/assets/aistudio/03_4ecca5b2.JPG',
+  '/assets/aistudio/04_f6086824.JPG',
+  '/assets/aistudio/05_908c9097.JPG',
+  '/assets/aistudio/06_1d637cc8.JPG',
+  '/assets/aistudio/07_32c8240e.JPG',
+  '/assets/aistudio/08_76eb6762.JPG',
+  '/assets/aistudio/09_97406f6c.JPG',
+  '/assets/aistudio/10_6e9a601c.JPG',
+  '/assets/aistudio/11_0a191cbe.JPG',
+  '/assets/aistudio/12_3a766aca.JPG',
+  '/assets/aistudio/13_0792ed01.JPG',
+  '/assets/aistudio/14_2ba316e1.JPG',
+  '/assets/aistudio/15_719df913.JPG',
+  '/assets/aistudio/16_a9a182be.JPG',
+  '/assets/aistudio/17_33eaca83.JPG',
+  '/assets/aistudio/18_41675b32.JPG',
+];
+
+// 2b. Pages for "وقت المغامرة مع فين وجيك" - العدد #2 (Adventure Time Chapter 2: 17 Pages)
+export const ADVENTURE_TIME_CH2_PAGES: string[] = [
+  '/assets/aistudio/at_ch2_01.jpg',
+  '/assets/aistudio/at_ch2_02.jpg',
+  '/assets/aistudio/at_ch2_03.jpg',
+  '/assets/aistudio/at_ch2_04.jpg',
+  '/assets/aistudio/at_ch2_05.jpg',
+  '/assets/aistudio/at_ch2_06.jpg',
+  '/assets/aistudio/at_ch2_07.jpg',
+  '/assets/aistudio/at_ch2_08.jpg',
+  '/assets/aistudio/at_ch2_09.jpg',
+  '/assets/aistudio/at_ch2_10.jpg',
+  '/assets/aistudio/at_ch2_11.jpg',
+  '/assets/aistudio/at_ch2_12.jpg',
+  '/assets/aistudio/at_ch2_13.jpg',
+  '/assets/aistudio/at_ch2_14.jpg',
+  '/assets/aistudio/at_ch2_15.jpg',
+  '/assets/aistudio/at_ch2_16.jpg',
+  '/assets/aistudio/at_ch2_17.jpg',
+];
+
+// REAL COMICS with distinct chapters and independent readers
+export const COMICS_DATA: Comic[] = [
+  {
+    id: 'adventure-time',
+    title: 'وقت المغامرة مع فين وجيك',
+    originalTitle: 'Adventure Time with Finn & Jake',
+    coverImage: '/assets/aistudio/01_b8ba92cf.JPG',
+    bannerImage: '/assets/aistudio/IMG_8638_b63418b7.jpeg',
+    author: 'بين دالتون وارد & ريان نورث',
+    artist: 'شيلي بارولين وبرادن لامب',
+    arabicTranslator: 'زياد الهواري (فريق كوميكينج)',
+    arabicLetterer: 'زياد الهواري',
+    arabicPublisher: 'كابوم! (KaBOOM!) / كرتون نتورك',
+    genres: ['مغامرات', 'فانتازيا وخيال', 'كوميديا', 'أصدقاء أوفياء'],
+    status: 'مستمر',
+    rating: 4.95,
+    views: '198,200',
+    synopsis: 'انضم إلى فين البشري وصديقه الوفي الكلب السحري جيك في أرض أوو السحرية! عندما يعود الشرير الأسطوري "الليتش" بقوته التدميرية مستخدماً حقيبة تخزين عملاقة تبتلع كوكب الأرض بأكمله، يقف الأصدقاء مع أميرة العلكة وملك الجليد لإنقاذ الجميع في مغامرة ملحمية كاملة.',
+    chapters: [
+      {
+        id: 'at-ch-1',
+        chapterNumber: 1,
+        title: 'العدد #1: عودة الليتش وابتلاع أرض أوو',
+        pagesCount: 18,
+        releaseDate: '2026-03-05',
+        pages: ADVENTURE_TIME_PAGES,
+      },
+      {
+        id: 'at-ch-2',
+        chapterNumber: 2,
+        title: 'العدد #2: في بطن الليتش ومغامرة الصحراء والسحاب',
+        pagesCount: 17,
+        releaseDate: '2026-03-10',
+        pages: ADVENTURE_TIME_CH2_PAGES,
+      },
+    ],
+  },
+  {
+    id: 'i-hate-you-please-die',
+    title: 'أكرهك، أرجوك مُت!',
+    originalTitle: 'I Hate You, Please Die!',
+    coverImage: '/assets/aistudio/IHYPD01_01_1b968151.jpg',
+    bannerImage: '/assets/aistudio/IHYPD01_01_1b968151.jpg',
+    author: 'غاريت غان (Garrett Gunn)',
+    artist: 'ماليا إيوارت (Malia Ewart)',
+    arabicTranslator: 'مهند أحمد',
+    arabicLetterer: 'راشد البجلي (رايدون)',
+    arabicPublisher: 'إنفينتلز 2026 (INFINTLES)',
+    genres: ['رعب نفسي', 'كوميديا سوداء', 'خوارق', 'دراما مراهقين'],
+    status: 'مكتمل',
+    rating: 4.9,
+    views: '124,500',
+    synopsis: 'قصة غابرييل كيمبيس، فتى يعاني من التنمر الشديد والمعاملة القاسية في مدرسته ومنزله. في لحظة يأس وظلام، يظهر له كائن شيطاني أنيق يعرض عليه صفقة لا يمكن رفضها: القضاء على كل من آذاه بأبشع الطرق مقابل روحه! رحلة مجنونة تجمع بين الرعب النفسي والكوميديا السوداء والانتقام الدموي.',
+    chapters: [
+      {
+        id: 'ihypd-ch-1',
+        chapterNumber: 1,
+        title: 'الكتاب 01: العقد الشيطاني وبداية الكابوس (الفصل الكامل)',
+        pagesCount: 36,
+        releaseDate: '2026-03-01',
+        pages: HATE_YOU_PAGES,
+      },
+    ],
+  },
+];
+
+// Episodes for Over The Garden Wall (خلف حائط الحديقة)
+const OTGW_SEASON_1_EPISODES: DubEpisode[] = [
+  {
+    id: 'otgw-s1-ep1',
+    episodeNumber: 1,
+    title: 'الحلقة الأولى: خلف حائط الحديقة',
+    duration: '14:54',
+    thumbnail: '/assets/aistudio/otgw_ep1.jpg',
+    videoUrl: '/assets/aistudio/________________________1_______________8f167c2a.mp4',
+    dubStudio: 'كرتون نتورك بالعربية (إيمدج برودكشن هاوس)',
+    voiceActors: ['وِيرت (الأداء الصوتي العربي)', 'جريج', 'بياتريس', 'الحطاب'],
+    releaseDate: '2026-03-09',
+    description: 'يجد الشقيقان وِيرت وجريج نفسيهما تائهين في غابة المجهول الغامضة والمهيبة، ويلتقيان بالحطاب الذي يحذرهما من الوحش المتربص قبل أن يقودهما مسارهما إلى بلدة بوتسفيلد وقاطنيها من اليقطين العجيب.',
+    isComingSoon: false,
+  },
+  {
+    id: 'otgw-s1-ep2',
+    episodeNumber: 2,
+    title: 'الحلقة الثانية: أوهام في المدرسة (بطاطس وعسل أسود)',
+    duration: '15:07',
+    thumbnail: '/assets/aistudio/otgw_ep2_thumb.jpg',
+    videoUrl: '/assets/aistudio/videoplayback_1c04f1d3.mp4',
+    dubStudio: 'كرتون نتورك بالعربية (إيمدج برودكشن هاوس)',
+    voiceActors: ['وِيرت', 'جريج', 'بياتريس', 'الآنسة لانغتري', 'السيد لانغتري', 'جيمي براون'],
+    releaseDate: '2026-03-09',
+    description: 'يصل وِيرت وجريج وبياتريس إلى مدرسة حيوانات غريبة تديرها المعلمة الحزينة الآنسة لانغتري، ويحاول جريج إبهار الجميع وأداء أغنية "بطاطس وعسل أسود" الشهيرة لإنقاذ المدرسة وحل لغز الغوريلا المتجولة.',
+    isComingSoon: false,
+  },
+  {
+    id: 'otgw-s1-ep3',
+    episodeNumber: 3,
+    title: 'الحلقة الثالثة: أغاني الحانة المظلمة ورحلة النهر',
+    duration: '14:45',
+    thumbnail: '/assets/aistudio/otgw_ep3_thumb.jpg',
+    videoUrl: '/assets/aistudio/videoplayback__1__e98783f3.mp4',
+    dubStudio: 'كرتون نتورك بالعربية (إيمدج برودكشن هاوس)',
+    voiceActors: ['وِيرت', 'جريج', 'بياتريس', 'سيدة الحانة', 'رجل الطريق', 'الحطاب'],
+    releaseDate: '2026-03-09',
+    description: 'يلجأ وِيرت وجريج وبياتريس إلى حانة غامضة للاحتماء من عاصفة ممطرة، فيتعرفون على شخصيات غريبة وروح "رجل الطريق" وأغاني المصباح، قبل الانطلاق في رحلة النهر نحو مرعى أديليد.',
+    isComingSoon: false,
+  },
+  {
+    id: 'otgw-s1-ep4',
+    episodeNumber: 4,
+    title: 'الحلقة الرابعة: ذكريات في المجهول (شريط سارة وسر السور)',
+    duration: '09:52',
+    thumbnail: '/assets/aistudio/otgw_ep4_thumb.jpg',
+    videoUrl: '/assets/aistudio/videoplayback__3__a46bafca.mp4',
+    dubStudio: 'كرتون نتورك بالعربية (إيمدج برودكشن هاوس)',
+    voiceActors: ['وِيرت', 'جريج', 'سارة', 'جيسون فاندربيركر', 'السيدة دانيلز', 'الشرطة'],
+    releaseDate: '2026-03-09',
+    description: 'فلاش باك يكشف كيف وصل وِيرت وجريج إلى المجهول في ليلة الهالوين، ومحاولة وِيرت استرجاع شريط الكاسيت السري الذي سجله لسارة، والهروب من الشرطة وسقوطهما المثير خلف سور المقبرة.',
+    isComingSoon: false,
+  },
+  {
+    id: 'otgw-s1-ep5',
+    episodeNumber: 5,
+    title: 'الحلقة الخامسة: رنين الجرس السحري وأحلام السحاب',
+    duration: '14:14',
+    thumbnail: '/assets/aistudio/otgw_ep5_thumb.jpg',
+    videoUrl: '/assets/aistudio/videoplayback__2__2cf83072.mp4',
+    dubStudio: 'كرتون نتورك بالعربية (إيمدج برودكشن هاوس)',
+    voiceActors: ['وِيرت', 'جريج', 'الخادمة لورنا', 'العمة ويسبرز', 'سيدة السحاب', 'الوحش'],
+    releaseDate: '2026-03-09',
+    description: 'يختبئ وِيرت وجريج في كوخ العمة ويسبرز والخادمة لورنا المحكومة برنين الجرس السحري لحبس الروح الشريرة، تليها رحلة جريج في العاصفة الثلجية وصعوده إلى مدينة السحاب لإنقاذ شقيقه.',
+    isComingSoon: false,
+  },
+  {
+    id: 'otgw-s1-ep6',
+    episodeNumber: 6,
+    title: 'الحلقة السادسة: المواجهة الأخيرة وسر الفانوس (العودة للديار)',
+    duration: '08:34',
+    thumbnail: '/assets/aistudio/otgw_ep6_thumb.jpg',
+    videoUrl: '/assets/aistudio/videoplayback__4__14869d3a.mp4',
+    dubStudio: 'كرتون نتورك بالعربية (إيمدج برودكشن هاوس)',
+    voiceActors: ['وِيرت', 'جريج', 'الحطاب', 'الوحش', 'بياتريس', 'سارة'],
+    releaseDate: '2026-03-09',
+    description: 'المعركة الحاسمة! يكتشف وِيرت حقيقة زيت المصباح وروح الوحش، ويتحرر الحطاب من الخدعة، ليتم إنقاذ جريج وإهداء بياتريس المقص السحري واستيقاظ الشقيقين سالمين في عالم الواقع والمستشفى.',
+    isComingSoon: false,
+  },
+  {
+    id: 'otgw-s1-ep7',
+    episodeNumber: 7,
+    title: 'الحلقة 07: رنين الجرس السحري (العمة ويسبرز ولورنا)',
+    duration: '11:15',
+    thumbnail: '/assets/aistudio/otgw_ep1.jpg',
+    videoUrl: '',
+    dubStudio: 'كرتون نتورك بالعربية',
+    voiceActors: ['وِيرت', 'جريج', 'العمة ويسبرز', 'لورنا'],
+    releaseDate: 'جاهزة للربط',
+    description: 'يصل وِيرت وجريج إلى كوخ معزول حيث تعيش لورنا الفتاة الخادمة المحكومة بجرس سحري تأمرها به العمة ويسبرز لإبعاد الروح الشريرة.',
+    isComingSoon: true,
+  },
+  {
+    id: 'otgw-s1-ep8',
+    episodeNumber: 8,
+    title: 'الحلقة 08: أطفال في غابة السحب (مدينة الأحلام)',
+    duration: '11:40',
+    thumbnail: '/assets/aistudio/otgw_banner.jpg',
+    videoUrl: '',
+    dubStudio: 'كرتون نتورك بالعربية',
+    voiceActors: ['وِيرت', 'جريج', 'ملكة السحاب', 'الوحش'],
+    releaseDate: 'جاهزة للربط',
+    description: 'في ليلة عاصفة ثلجية قاسية، يستسلم وِيرت لليأس، بينما يهرب جريج إلى عالم أحلام السحاب ويلتقي بملكة السحاب ليطلب أمنية لإنقاذ أخيه.',
+    isComingSoon: true,
+  },
+  {
+    id: 'otgw-s1-ep9',
+    episodeNumber: 9,
+    title: 'الحلقة 09: في المجهول (ليلة المقبرة وشريط سارة)',
+    duration: '11:25',
+    thumbnail: '/assets/aistudio/otgw_cover.jpg',
+    videoUrl: '',
+    dubStudio: 'كرتون نتورك بالعربية',
+    voiceActors: ['وِيرت', 'جريج', 'سارة', 'جيسون فاندربيركر'],
+    releaseDate: 'جاهزة للربط',
+    description: 'فلاش باك يكشف كيف انتهى المطاف بوِيرت وجريج في غابة المجهول ليلة الهالوين بعد القفز فوق سور مقبرة البلدة هرباً من الشرطة.',
+    isComingSoon: true,
+  },
+  {
+    id: 'otgw-s1-ep10',
+    episodeNumber: 10,
+    title: 'الحلقة 10: المجهول (المواجهة الختامية وسر الفانوس)',
+    duration: '12:00',
+    thumbnail: '/assets/aistudio/otgw_banner.jpg',
+    videoUrl: '',
+    dubStudio: 'كرتون نتورك بالعربية',
+    voiceActors: ['وِيرت', 'جريج', 'بياتريس', 'الحطاب', 'الوحش'],
+    releaseDate: 'جاهزة للربط',
+    description: 'الحلقة الختامية الكبرى: يكتشف وِيرت خدعة الوحش الأزلية للحطاب وينقذ شقيقه جريج، ليعود الجميع بسلام إلى عالم الواقع.',
+    isComingSoon: true,
+  },
+];
+
+// Episodes for Adventure Time (وقت المغامرة) - All 26 episodes paired 2-in-1 into 13 slots
+export const ADVENTURE_TIME_SEASON_1_EPISODES: DubEpisode[] = [
+  {
+    id: 'at-s1-ep1-2',
+    episodeNumber: 1,
+    title: 'الحلقة 1 و2: هلع في حفلة النوم & ورطة في الفضاء الوعر',
+    duration: '21:47',
+    thumbnail: '/assets/aistudio/at_s1_e1_2_thumb.jpg',
+    driveLink: 'https://drive.google.com/uc?export=download&id=1hOmA05Lqm86kCKJrylhl0A3Y1lj3Dkei',
+    videoUrl: 'https://drive.google.com/uc?export=download&id=1hOmA05Lqm86kCKJrylhl0A3Y1lj3Dkei',
+    dubStudio: 'كرتون نتورك بالعربية (إيمدج برودكشن هاوس)',
+    voiceActors: ['داني بستاني (دور فين)', 'سعد حمدان (دور جيك)', 'رنا الرفاعي (أميرة العلكة)', 'أميرة الفضاء الوعر'],
+    releaseDate: '2026-03-10',
+    description: 'الحلقة الأولى والثانية المدمجة بالدبلجة الرسمية: تجربة أميرة العلكة لتحريك موتى الحلوى تسير بشكل خاطئ في "هلع في حفلة النوم"، ثم رحلة فين وجيك إلى الفضاء الوعر لإنقاذ جيك من التحول إلى ساكن وعر في "ورطة في الفضاء الوعر".',
+    isComingSoon: false,
+  },
+  {
+    id: 'at-s1-ep3-4',
+    episodeNumber: 2,
+    title: 'الحلقة 3 و4: دليل الأبطال إنكيريديون & الهزهاز العجيب',
+    duration: '21:33',
+    thumbnail: '/assets/aistudio/at_s1_e3_4_thumb.jpg',
+    driveLink: 'https://drive.google.com/uc?export=download&id=1quIquuM38qrPgBm08tVwZp4uXmAPHI8h',
+    videoUrl: 'https://drive.google.com/uc?export=download&id=1quIquuM38qrPgBm08tVwZp4uXmAPHI8h',
+    dubStudio: 'كرتون نتورك بالعربية (إيمدج برودكشن هاوس)',
+    voiceActors: ['داني بستاني (دور فين)', 'سعد حمدان (دور جيك)', 'رجل المانيش (المينيتور)', 'كيبر'],
+    releaseDate: '2026-03-10',
+    description: 'الحلقة الثالثة والرابعة المدمجة بالدبلجة الرسمية: يخوض فين وجيك اختبارات الشجاعة والقلب النقي للحصول على كتاب الأبطال المقدس في "إنكيريديون!"، ومغامرة إنقاذ الكائن الصغير الهزهاز وإعادته لأمه في "الهزهاز العجيب".',
+    isComingSoon: false,
+  },
+  {
+    id: 'at-s1-ep5-6',
+    episodeNumber: 3,
+    title: 'الحلقة 5 و6: سجينات الحب & شجرة الشجعان تري ترانكس',
+    duration: '22:10',
+    thumbnail: '/assets/aistudio/IMG_8638_b63418b7.jpeg',
+    videoUrl: '',
+    dubStudio: 'كرتون نتورك بالعربية (إيمدج برودكشن هاوس)',
+    voiceActors: ['داني بستاني (فين)', 'سعد حمدان (جيك)', 'ملك الجليد', 'تري ترانكس'],
+    releaseDate: 'جاهزة للربط عبر درايف',
+    description: 'الحلقة الخامسة والسادسة المدمجة: يقع فين وجيك في قبضة ملك الجليد داخل قلعته الجليدية مع الأميرات المخطوفات في "سجينات الحب"، تليها مغامرة البحث عن تفاحة الكريستال السحرية في الغابة المظلمة مع الفيلة تري ترانكس.',
+    isComingSoon: true,
+  },
+  {
+    id: 'at-s1-ep7-8',
+    episodeNumber: 4,
+    title: 'الحلقة 7 و8: ريكاردو رجل القلب & وقت العمل (رجال الأعمال)',
+    duration: '21:55',
+    thumbnail: '/assets/aistudio/IMG_8638_b63418b7.jpeg',
+    videoUrl: '',
+    dubStudio: 'كرتون نتورك بالعربية (إيمدج برودكشن هاوس)',
+    voiceActors: ['داني بستاني (فين)', 'سعد حمدان (جيك)', 'أميرة العلكة', 'جورج دي كيو'],
+    releaseDate: 'جاهزة للربط عبر درايف',
+    description: 'الحلقة السابعة والثامنة المدمجة: يظهر كائن غريب على شكل قلب يُدعى ريكاردو يحاول التودد لأميرة العلكة فيشك فين بنواياه في "ريكاردو رجل القلب"، تليها مغامرة العثور على رجال أعمال مجمدين داخل جبل جليدي في "رجال الأعمال".',
+    isComingSoon: true,
+  },
+  {
+    id: 'at-s1-ep9-10',
+    episodeNumber: 5,
+    title: 'الحلقة 9 و10: شخصاي المفضلان & ذكريات جبل بوم بوم',
+    duration: '22:05',
+    thumbnail: '/assets/aistudio/IMG_8638_b63418b7.jpeg',
+    videoUrl: '',
+    dubStudio: 'كرتون نتورك بالعربية (إيمدج برودكشن هاوس)',
+    voiceActors: ['داني بستاني (فين)', 'سعد حمدان (جيك)', 'ليدي رينيكورن'],
+    releaseDate: 'جاهزة للربط عبر درايف',
+    description: 'الحلقة التاسعة والعاشرة المدمجة: محاولة جيك التوفيق بين تمضية الوقت مع فين وليدي رينيكورن بمترجم عالمي في "شخصاي المفضلان"، تليها رحلة فين لحل أزمات سكان أرض أوو الغريبة بسبب عهد طفولته في "ذكريات جبل بوم بوم".',
+    isComingSoon: true,
+  },
+  {
+    id: 'at-s1-ep11-12',
+    episodeNumber: 6,
+    title: 'الحلقة 11 و12: قوى الساحر & مطرودون من البيت الشجري',
+    duration: '22:15',
+    thumbnail: '/assets/aistudio/IMG_8638_b63418b7.jpeg',
+    videoUrl: '',
+    dubStudio: 'كرتون نتورك بالعربية (إيمدج برودكشن هاوس)',
+    voiceActors: ['داني بستاني (فين)', 'سعد حمدان (جيك)', 'مارسلين (ملكة مصاصي الدماء)'],
+    releaseDate: 'جاهزة للربط عبر درايف',
+    description: 'الحلقة 11 و12 المدمجة: يحصل فين وجيك على قوى سحرية غريبة من مدرسة السحرة الغامضة في "الساحر"، ثم الظهور الأول لملكة مصاصي الدماء "مارسلين" التي تطردهما من منزلهما الشجري في "مطرودون!".',
+    isComingSoon: true,
+  },
+  {
+    id: 'at-s1-ep13-14',
+    episodeNumber: 7,
+    title: 'الحلقة 13 و14: مدينة اللصوص & حديقة الساحرة',
+    duration: '21:50',
+    thumbnail: '/assets/aistudio/IMG_8638_b63418b7.jpeg',
+    videoUrl: '',
+    dubStudio: 'كرتون نتورك بالعربية (إيمدج برودكشن هاوس)',
+    voiceActors: ['داني بستاني (فين)', 'سعد حمدان (جيك)', 'الساحرة العجوز'],
+    releaseDate: 'جاهزة للربط عبر درايف',
+    description: 'الحلقة 13 و14 المدمجة: يدخل فين وجيك مدينة اللصوص لمساعدة فتاة صغيرة في استرجاع سلتها المفقودة في "مدينة اللصوص"، تليها مغامرة فقدان جيك لقدراته السحرية بعد تناول كعكة دونات في "حديقة الساحرة".',
+    isComingSoon: true,
+  },
+  {
+    id: 'at-s1-ep15-16',
+    episodeNumber: 8,
+    title: 'الحلقة 15 و16: صانع الفطائر نيبر & محيط الخوف',
+    duration: '22:00',
+    thumbnail: '/assets/aistudio/IMG_8638_b63418b7.jpeg',
+    videoUrl: '',
+    dubStudio: 'كرتون نتورك بالعربية (إيمدج برودكشن هاوس)',
+    voiceActors: ['داني بستاني (فين)', 'سعد حمدان (جيك)', 'نيبر صانع الفطائر'],
+    releaseDate: 'جاهزة للربط عبر درايف',
+    description: 'الحلقة 15 و16 المدمجة: يصنع فين روبوتاً صغيراً لرمي الفطائر باسم "نيبر" لعمل مقلب بجيك في "ما هي الحياة؟"، تليها مواجهة فين لأكبر مخاوفه وهي الفوبيا من المحيط والبحار في "محيط الخوف".',
+    isComingSoon: true,
+  },
+  {
+    id: 'at-s1-ep17-18',
+    episodeNumber: 9,
+    title: 'الحلقة 17 و18: عندما تذوب أجراس الزفاف & زنزانة الأبراج',
+    duration: '21:55',
+    thumbnail: '/assets/aistudio/IMG_8638_b63418b7.jpeg',
+    videoUrl: '',
+    dubStudio: 'كرتون نتورك بالعربية (إيمدج برودكشن هاوس)',
+    voiceActors: ['داني بستاني (فين)', 'سعد حمدان (جيك)', 'ملك الجليد'],
+    releaseDate: 'جاهزة للربط عبر درايف',
+    description: 'الحلقة 17 و18 المدمجة: يحاول ملك الجليد التراجع عن أفعاله الشريرة والتخلي عن حبس الأميرات في "عندما تذوب أجراس الزفاف"، تليها مغامرة نزول فين إلى زنزانة أبراج مظلمة مليئة بالوحوش والأفخاخ في "الزنزانة".',
+    isComingSoon: true,
+  },
+  {
+    id: 'at-s1-ep19-20',
+    episodeNumber: 10,
+    title: 'الحلقة 19 و20: دوق المكسرات & مدينة المسوخ (ماجيك مان)',
+    duration: '22:10',
+    thumbnail: '/assets/aistudio/IMG_8638_b63418b7.jpeg',
+    videoUrl: '',
+    dubStudio: 'كرتون نتورك بالعربية (إيمدج برودكشن هاوس)',
+    voiceActors: ['داني بستاني (فين)', 'سعد حمدان (جيك)', 'ماجيك مان', 'أميرة العلكة'],
+    releaseDate: 'جاهزة للربط عبر درايف',
+    description: 'الحلقة 19 و20 المدمجة: يتسبب فين في تحول أميرة العلكة إلى اللون الأخضر وإلصاق التهمة بدوق المكسرات في "الدوق"، تليها مواجهة ماجيك مان الشرير الذي يحول فين إلى قدم بشرية عملاقة في "مدينة المسوخ".',
+    isComingSoon: true,
+  },
+  {
+    id: 'at-s1-ep21-22',
+    episodeNumber: 11,
+    title: 'الحلقة 21 و22: دوني الوحش العشبي & خادم مارسلين المطيع',
+    duration: '22:05',
+    thumbnail: '/assets/aistudio/IMG_8638_b63418b7.jpeg',
+    videoUrl: '',
+    dubStudio: 'كرتون نتورك بالعربية (إيمدج برودكشن هاوس)',
+    voiceActors: ['داني بستاني (فين)', 'سعد حمدان (جيك)', 'دوني', 'مارسلين'],
+    releaseDate: 'جاهزة للربط عبر درايف',
+    description: 'الحلقة 21 و22 المدمجة: يحاول فين وجيك تهذيب كائن عشبي غليظ يُدعى دوني لحماية شعب المنازل الصغيرة في "دوني"، تليها محاولة فين إنقاذ جيك بالتطوع ليصبح خادم مارسلين الشخصي في "المساعد المطيع".',
+    isComingSoon: true,
+  },
+  {
+    id: 'at-s1-ep23-24',
+    episodeNumber: 12,
+    title: 'الحلقة 23 و24: أحلام اليقظة الممطرة & مهمة القصر السرية',
+    duration: '22:15',
+    thumbnail: '/assets/aistudio/IMG_8638_b63418b7.jpeg',
+    videoUrl: '',
+    dubStudio: 'كرتون نتورك بالعربية (إيمدج برودكشن هاوس)',
+    voiceActors: ['داني بستاني (فين)', 'سعد حمدان (جيك)', 'أميرة العلكة'],
+    releaseDate: 'جاهزة للربط عبر درايف',
+    description: 'الحلقة 23 و24 المدمجة: يضطر فين وجيك للبقاء في المنزل بسبب عاصفة السكاكين وتتحول تخيلات جيك إلى واقع في "أحلام اليقظة الممطرة"، تليها مهمة سرية تكلفهما بها أميرة العلكة للقبض على ملك الجليد في "ماذا فعلت؟".',
+    isComingSoon: true,
+  },
+  {
+    id: 'at-s1-ep25-26',
+    episodeNumber: 13,
+    title: 'الحلقة 25 و26: بطله المفضل بيلّي & طاحن الشجاعة (ختام الموسم)',
+    duration: '22:20',
+    thumbnail: '/assets/aistudio/IMG_8638_b63418b7.jpeg',
+    videoUrl: '',
+    dubStudio: 'كرتون نتورك بالعربية (إيمدج برودكشن هاوس)',
+    voiceActors: ['داني بستاني (فين)', 'سعد حمدان (جيك)', 'بيلّي المحارب العظيم'],
+    releaseDate: 'جاهزة للربط عبر درايف',
+    description: 'الحلقة 25 و26 المدمجة (ختام الموسم الأول الأسطوري): يلتقي فين وجيك ببطلهما التاريخي العظيم "بيلّي" ويكتشفان فلسفته في "بطله المفضل"، تليها مغامرة ملاحقة وحش "طاحن الشجاعة" وسر شكوك القرويين في "طاحن الشجاعة".',
+    isComingSoon: true,
+  },
+];
+
+// DUBBED WORKS: "خلف حائط الحديقة" is the FIRST premiere series as explicitly ordered by user!
+export const DUBBED_WORKS: DubSeries[] = [
+  {
+    id: 'over-the-garden-wall',
+    title: 'خلف حائط الحديقة',
+    originalTitle: 'Over the Garden Wall (Cartoon Network Arabic)',
+    coverImage: '/assets/aistudio/otgw_cover.jpg',
+    bannerImage: '/assets/aistudio/otgw_banner.jpg',
+    genres: ['كرتون مدبلج', 'غموض وفانتازيا', 'مغامرات الخريف', 'دبلجة كرتون نتورك الرسمية'],
+    dubStudio: 'كرتون نتورك بالعربية (إيمدج برودكشن هاوس)',
+    director: 'باتريك ماكهيل / إشراف: رنا الرفاعي',
+    rating: 4.99,
+    episodesCount: 10,
+    synopsis: 'المسلسل الكلاسيكي الأسطوري الحائز على جوائز الإيمي! يضيع الشقيقان "وِيرت" الفتى المفكر الحذر وشقيقه الأصغر المرح "جريج" في غابة غامضة تُدعى "المجهول". بمساعدة الحطاب العجوز والعصفورة الزرقاء المتمردة "بياتريس"، يحاولان شق طريقهما إلى المنزل متفادين الوحش الشرير المتربص في الظلال.',
+    seasons: [
+      {
+        id: 'otgw-season-1',
+        seasonNumber: 1,
+        title: 'الموسم الأول (غابة المجهول)',
+        description: 'الموسم الأول الكامل (10 حلقات) - رحلة وِيرت وجريج في مواجهة الوحش والبحث عن العودة للديار.',
+        episodesCount: 10,
+        episodes: OTGW_SEASON_1_EPISODES,
+      },
+    ],
+    episodes: OTGW_SEASON_1_EPISODES,
+  },
+  {
+    id: 'adventure-time-dub',
+    title: 'وقت المغامرة (الحلقات المدبلجة للعربية)',
+    originalTitle: 'Adventure Time Arabic Dubbed Animation',
+    coverImage: '/assets/aistudio/IMG_8638_b63418b7.jpeg',
+    bannerImage: '/assets/aistudio/IMG_8638_b63418b7.jpeg',
+    genres: ['كرتون مدبلج', 'مغامرات وكوميديا', 'دبلجة كرتون نتورك الأصلية'],
+    dubStudio: 'استوديو كرتون نتورك بالعربية (إيمدج برودكشن هاوس)',
+    director: 'جورج أبو سلبي',
+    rating: 4.98,
+    episodesCount: 238,
+    synopsis: 'السلسلة الكاملة لجميع المواسم العشرة لمغامرات فين وجيك في أرض أوو بالدبلجة العربية الرسمية لكرتون نتورك! الموسم الأول مدمج (2 في 1)، والموسم الثاني يبدأ بحلقتين مدمجتين ثم حلقات منفردة، وباقي المواسم بحلقات منفردة كاملة جاهزة للربط.',
+    seasons: getAdventureTimeAllSeasons(ADVENTURE_TIME_SEASON_1_EPISODES),
+    episodes: ADVENTURE_TIME_SEASON_1_EPISODES,
+  },
+  {
+    id: 'avatar-the-last-airbender',
+    title: 'أفاتار: أسطورة أنج (مسخر الهواء الأخير)',
+    originalTitle: 'Avatar: The Last Airbender - The Complete 3 Books',
+    coverImage: '/assets/aistudio/IMG_8637_c164a49d.jpeg',
+    bannerImage: '/assets/aistudio/IMG_8637_c164a49d.jpeg',
+    genres: ['أنيميشن ملحمي', 'فانتازيا وتسخير العناصر', 'مغامرات وفنون قتالية', 'دبلجة عربية فصحى'],
+    dubStudio: 'نيكلوديون بالعربية (مركز الزهرة / إيمدج برودكشن)',
+    director: 'مايكل دانتي ديمارتينو وبراين كونيتزكو',
+    rating: 4.99,
+    episodesCount: 61,
+    synopsis: 'الماء، الأرض، النار، الهواء. السلسلة الأسطورية الكاملة بكتبها الثلاثة (كتاب الماء، كتاب الأرض، كتاب النار) في رحلة الأفاتار أنج لإعادة التوازن للأرض ومواجهة أمة النار.',
+    seasons: AVATAR_ALL_SEASONS,
+    episodes: AVATAR_ALL_SEASONS[0].episodes,
+  },
+  {
+    id: 'fionna-and-cake',
+    title: 'وقت المغامرة: فيونا وكيك',
+    originalTitle: 'Adventure Time: Fionna and Cake - Seasons 1 & 2',
+    coverImage: '/assets/aistudio/IMG_8639_beebee8c.jpeg',
+    bannerImage: '/assets/aistudio/IMG_8639_beebee8c.jpeg',
+    genres: ['أنيميشن للكبار والمراهقين', 'فانتازيا الأكوان الموازية', 'مغامرات وإثارة', 'دبلجة عربية رسمية'],
+    dubStudio: 'استوديو كرتون نتورك / إتش بي أو ماكس بالعربية',
+    director: 'آدم موتو',
+    rating: 4.97,
+    episodesCount: 20,
+    synopsis: 'السلسلة الكاملة بموسميها الأول والثاني لمغامرات فيونا الفتاة الشجاعة وقطتها كيك عبر الأكوان المتعددة والأبعاد السحرية البديلة بالدبلجة العربية الرسمية.',
+    seasons: FIONNA_CAKE_ALL_SEASONS,
+    episodes: FIONNA_CAKE_ALL_SEASONS[0].episodes,
+  },
+  {
+    id: 'amphibia-dub',
+    title: 'إمفيبيا (عالم البرمائيات)',
+    originalTitle: 'Disney Amphibia - The Complete 3 Seasons',
+    coverImage: '/assets/aistudio/amphibia_cover.svg',
+    bannerImage: '/assets/aistudio/amphibia_cover.svg',
+    genres: ['أنيميشن عائلي', 'مغامرات وفانتازيا كوميدية', 'عوالم سحرية وضفادع', 'دبلجة ديزني الرسمية'],
+    dubStudio: 'استوديوهات ديزني للرسوم المتحركة (الدبلجة العربية)',
+    director: 'مات برالي',
+    rating: 4.96,
+    episodesCount: 58,
+    synopsis: 'السلسلة الكاملة بجميع مواسمها الثلاثة لمغامرات آن بونشوي وعائلة بلانتار في عالم إمفيبيا الساحر ورحلة العودة إلى الأرض بالدبلجة العربية الرسمية لديزني (58 حلقة منفردة مستقلة بالكامل جاهزة للربط).',
+    seasons: AMPHIBIA_ALL_SEASONS,
+    episodes: AMPHIBIA_ALL_SEASONS[0].episodes,
+  },
+  {
+    id: 'hate-you-please-die-dub',
+    title: 'أكرهك، أرجوك مُت! (الأنيميشن المدبلج)',
+    originalTitle: 'I Hate You, Please Die - Motion Comic Series',
+    coverImage: '/assets/aistudio/IHYPD01_01_1b968151.jpg',
+    bannerImage: '/assets/aistudio/IHYPD01_01_1b968151.jpg',
+    genres: ['موشن كوميك', 'رعب وإثارة', 'دبلجة فصحى احترافية'],
+    dubStudio: 'استوديو أنيفيرس الصوتي (AniVerse Dubbing Lab)',
+    director: 'عمر الشريف',
+    rating: 4.95,
+    episodesCount: 1,
+    synopsis: 'العمل الحصري المقتبس مباشرة من الكوميكس الشهير بتقنية الموشن كوميك مع مؤثرات صوتية تصويرية وأداء صوتي احترافي.',
+    seasons: [
+      {
+        id: 'ihypd-season-1',
+        seasonNumber: 1,
+        title: 'الموسم الأول',
+        description: 'الموسم الأول من سلسلة الموشن كوميك المرعبة.',
+        episodesCount: 1,
+        episodes: [
+          {
+            id: 'ep-1',
+            episodeNumber: 1,
+            title: 'الحلقة الأولى: اللقاء المشؤوم والصفقة الدموية',
+            duration: 'قريباً',
+            thumbnail: '/assets/aistudio/IHYPD01_09_537910fb.jpg',
+            videoUrl: '',
+            dubStudio: 'استوديو أنيفيرس',
+            voiceActors: ['خالد الشمري (دور غابرييل)', 'طارق العربي (دور الشيطان)', 'منى صبري (دور الأم)'],
+            releaseDate: 'قريباً',
+            description: 'يتعرض غابرييل لأقسى أيام حياته في المدرسة والمنزل حتى يصل إلى نقطة الانهيار، ليظهر له ضيف غير متوقع يحمل في يديه حلاً مستحيلاً. قريباً.',
+            isComingSoon: true,
+          },
+        ],
+      },
+    ],
+    episodes: [
+      {
+        id: 'ep-1',
+        episodeNumber: 1,
+        title: 'الحلقة الأولى: اللقاء المشؤوم والصفقة الدموية',
+        duration: 'قريباً',
+        thumbnail: '/assets/aistudio/IHYPD01_09_537910fb.jpg',
+        videoUrl: '',
+        dubStudio: 'استوديو أنيفيرس',
+        voiceActors: ['خالد الشمري (دور غابرييل)', 'طارق العربي (دور الشيطان)', 'منى صبري (دور الأم)'],
+        releaseDate: 'قريباً',
+        description: 'يتعرض غابرييل لأقسى أيام حياته في المدرسة والمنزل حتى يصل إلى نقطة الانهيار، ليظهر له ضيف غير متوقع يحمل في يديه حلاً مستحيلاً. قريباً.',
+        isComingSoon: true,
+      },
+    ],
+  },
+  {
+    id: 'adventure-time-distant-lands',
+    title: 'وقت المغامرة: أراضٍ بعيدة',
+    originalTitle: 'Adventure Time: Distant Lands (Special Movies)',
+    coverImage: '/assets/aistudio/IMG_8685_f1304d11.jpeg',
+    bannerImage: '/assets/aistudio/IMG_8685_f1304d11.jpeg',
+    genres: ['كرتون مدبلج', 'مغامرات وفانتازيا ملحمية', 'أفلام خاصة وتتمة أسطورية', 'دبلجة كرتون نتورك وإتش بي أو ماكس'],
+    dubStudio: 'استوديو كرتون نتورك / إتش بي أو ماكس (إيمدج برودكشن هاوس)',
+    director: 'آدم موتو',
+    rating: 4.99,
+    episodesCount: 4,
+    category: 'dubbed',
+    synopsis: 'السلسلة الرباعية الخاصة الأسطورية لوقت المغامرة (Distant Lands)! أربع حلقات سينمائية مطولة مدبلجة بجودة خارقة تستكشف زوايا غامضة ومصائر أبطال أرض أوو: مغامرة بيمو الفضائية، قصة حب مارسلين وأميرة العلكة في أوبسيديان، الرحلة الأبدية المؤثرة لفين وجيك في معاً من جديد، وأسرار مدينة السحرة.',
+    seasons: DISTANT_LANDS_ALL_SEASONS,
+    episodes: DISTANT_LANDS_ALL_SEASONS[0].episodes,
+  },
+];
+
+// ----------------------------------------------------
+// ANIME SECTION (قسم الأنمي المخصص)
+// ----------------------------------------------------
+
+export const FRAGRANT_FLOWER_EPISODES: DubEpisode[] = [
+  {
+    id: 'fragrant-flower-s1-ep1',
+    episodeNumber: 1,
+    title: 'الحلقة 01: اللقاء بين الكعك والكرامة',
+    duration: '23:45',
+    thumbnail: '/assets/aistudio/IMG_8659_99c6f5bd.jpeg',
+    videoUrl: '',
+    dubStudio: 'استوديو كلوفر وركس (CloverWorks) / ترجمة عربية كاملة',
+    voiceActors: ['رينتارو تسوموغي', 'كاوروكو واغوري', 'شوهي أوسامي', 'ساكو ناتسوساوا'],
+    releaseDate: 'جاهزة للربط عبر درايف',
+    description: 'في مخبز عائلته، يلتقي رينتارو الفتى الهادئ ذو المظهر القاسي بفتاة مرحة تدعى كاوروكو تلتهم الكعك بسعادة غامرة دون أن تخاف من مظهره، ليكتشف كلاهما أنهما يرتادان مدرستين متجاورتين يفصل بينهما عداء تاريخي طويل.',
+    isComingSoon: true,
+  },
+  {
+    id: 'fragrant-flower-s1-ep2',
+    episodeNumber: 2,
+    title: 'الحلقة 02: الجدار الفاصل بين تشيدوري وكيكيو',
+    duration: '23:40',
+    thumbnail: '/assets/aistudio/IMG_8659_99c6f5bd.jpeg',
+    videoUrl: '',
+    dubStudio: 'استوديو كلوفر وركس / ترجمة عربية',
+    voiceActors: ['رينتارو تسوموغي', 'كاوروكو واغوري', 'سوبارو هوشيزاكي'],
+    releaseDate: 'جاهزة للربط عبر درايف',
+    description: 'تحاول سوبارو الصديقة المقربة لكاوروكو تحذيرها من الاقتراب من طلاب ثانوية تشيدوري، بينما يحاول رينتارو كبح مشاعره كي لا يسبب أي إحراج أو ضرر لسمعة كاوروكو في مدرستها الراقية كيكيو.',
+    isComingSoon: true,
+  },
+  {
+    id: 'fragrant-flower-s1-ep3',
+    episodeNumber: 3,
+    title: 'الحلقة 03: ابتسامة كاوروكو الصادقة',
+    duration: '23:50',
+    thumbnail: '/assets/aistudio/IMG_8659_99c6f5bd.jpeg',
+    videoUrl: '',
+    dubStudio: 'استوديو كلوفر وركس / ترجمة عربية',
+    voiceActors: ['رينتارو تسوموغي', 'كاوروكو واغوري', 'شوهي', 'ساكو'],
+    releaseDate: 'جاهزة للربط عبر درايف',
+    description: 'تصر كاوروكو على لقاء رينتارو والتعبير عن امتنانها لدعمه، ويكتشف رينتارو لأول مرة شعور أن يتقبله شخص كما هو دون أحكام مسبقة على مظهره أو درجاته.',
+    isComingSoon: true,
+  },
+  {
+    id: 'fragrant-flower-s1-ep4',
+    episodeNumber: 4,
+    title: 'الحلقة 04: رفقاء الدرب وأصدقاء رينتارو الأوفياء',
+    duration: '23:35',
+    thumbnail: '/assets/aistudio/IMG_8659_99c6f5bd.jpeg',
+    videoUrl: '',
+    dubStudio: 'استوديو كلوفر وركس / ترجمة عربية',
+    voiceActors: ['شوهي أوسامي', 'ساكو ناتسوساوا', 'أيومي يوريزاوا', 'رينتارو'],
+    releaseDate: 'جاهزة للربط عبر درايف',
+    description: 'يكتشف أصدقاء رينتارو المقربون لقاءاته السرية مع فتاة من كيكيو، وبدلاً من السخرية يقفون في صفه ويقدمون له الدعم الصادق لحماية هذه الرابطة النقية.',
+    isComingSoon: true,
+  },
+  {
+    id: 'fragrant-flower-s1-ep5',
+    episodeNumber: 5,
+    title: 'الحلقة 05: جلسة المذاكرة المشتركة',
+    duration: '24:00',
+    thumbnail: '/assets/aistudio/IMG_8659_99c6f5bd.jpeg',
+    videoUrl: '',
+    dubStudio: 'استوديو كلوفر وركس / ترجمة عربية',
+    voiceActors: ['رينتارو', 'كاوروكو', 'سوبارو', 'شوهي'],
+    releaseDate: 'جاهزة للربط عبر درايف',
+    description: 'يجتمع الأصدقاء في مكتبة عامة لمساعدة رينتارو على تحسين درجاته قبل الامتحانات الفصلية، وتحدث مواجهة صريحة بين سوبارو ورينتارو تكشف عن مخاوفها وتفكك الجليد بينهما.',
+    isComingSoon: true,
+  },
+  {
+    id: 'fragrant-flower-s1-ep6',
+    episodeNumber: 6,
+    title: 'الحلقة 06: مهرجان الألعاب النارية الصيفي',
+    duration: '24:15',
+    thumbnail: '/assets/aistudio/IMG_8659_99c6f5bd.jpeg',
+    videoUrl: '',
+    dubStudio: 'استوديو كلوفر وركس / ترجمة عربية',
+    voiceActors: ['رينتارو', 'كاوروكو', 'جميع الأصدقاء'],
+    releaseDate: 'جاهزة للربط عبر درايف',
+    description: 'في ليلة المهرجان الصيفي وتحت أضواء الألعاب النارية الملونة، يرتدي الجميع زي اليوكاتا التقليدي وتتقارب قلوب رينتارو وكاوروكو في لحظة ساحرة لا تُنسى.',
+    isComingSoon: true,
+  },
+  {
+    id: 'fragrant-flower-s1-ep7',
+    episodeNumber: 7,
+    title: 'الحلقة 07: شجاعة الصدق والاعتراف',
+    duration: '23:45',
+    thumbnail: '/assets/aistudio/IMG_8659_99c6f5bd.jpeg',
+    videoUrl: '',
+    dubStudio: 'استوديو كلوفر وركس / ترجمة عربية',
+    voiceActors: ['رينتارو', 'كاوروكو', 'سوبارو'],
+    releaseDate: 'جاهزة للربط عبر درايف',
+    description: 'يواجه رينتارو نفسه بصدق حول حقيقة مشاعره تجاه كاوروكو، ويتعلم أن الشجاعة الحقيقية ليست في القوة الجسدية بل في القدرة على التعبير عن المشاعر بكرامة ونبل.',
+    isComingSoon: true,
+  },
+  {
+    id: 'fragrant-flower-s1-ep8',
+    episodeNumber: 8,
+    title: 'الحلقة 08: لقاء تحت المطر وسوء الفهم',
+    duration: '23:30',
+    thumbnail: '/assets/aistudio/IMG_8659_99c6f5bd.jpeg',
+    videoUrl: '',
+    dubStudio: 'استوديو كلوفر وركس / ترجمة عربية',
+    voiceActors: ['كاوروكو', 'رينتارو', 'معلمو كيكيو'],
+    releaseDate: 'جاهزة للربط عبر درايف',
+    description: 'يشهد أحد معلمي مدرسة كيكيو لقاء رينتارو وكاوروكو، مما يثير أزمة في المدرسة، لكن كاوروكو تقف بشجاعة للدفاع عن صديقها ورقي أخلاقه أمام الجميع.',
+    isComingSoon: true,
+  },
+  {
+    id: 'fragrant-flower-s1-ep9',
+    episodeNumber: 9,
+    title: 'الحلقة 09: خطوة للأمام نحو المستقبل',
+    duration: '23:55',
+    thumbnail: '/assets/aistudio/IMG_8659_99c6f5bd.jpeg',
+    videoUrl: '',
+    dubStudio: 'استوديو كلوفر وركس / ترجمة عربية',
+    voiceActors: ['رينتارو', 'والدة رينتارو', 'كاوروكو'],
+    releaseDate: 'جاهزة للربط عبر درايف',
+    description: 'يزور رينتارو مخبز عائلته بنظرة جديدة لمهنته ومستقبله، وتزوره كاوروكو لتتعلم فنون إعداد المعجنات وسط أجواء عائلية دافئة ومشاعر فياضة.',
+    isComingSoon: true,
+  },
+  {
+    id: 'fragrant-flower-s1-ep10',
+    episodeNumber: 10,
+    title: 'الحلقة 10: دفء القلوب وكسر الحواجز',
+    duration: '24:05',
+    thumbnail: '/assets/aistudio/IMG_8659_99c6f5bd.jpeg',
+    videoUrl: '',
+    dubStudio: 'استوديو كلوفر وركس / ترجمة عربية',
+    voiceActors: ['طلاب تشيدوري', 'طالبات كيكيو', 'رينتارو', 'كاوروكو'],
+    releaseDate: 'جاهزة للربط عبر درايف',
+    description: 'تتلاشى الأحكام المسبقة تدريجياً بين طلاب المدرستين عندما يتعرفون على حقيقة بعضهم البعض بعيداً عن الشائعات والأحكام السطحية الجائرة.',
+    isComingSoon: true,
+  },
+  {
+    id: 'fragrant-flower-s1-ep11',
+    episodeNumber: 11,
+    title: 'الحلقة 11: امتحان القلوب ونقاء المشاعر',
+    duration: '23:50',
+    thumbnail: '/assets/aistudio/IMG_8659_99c6f5bd.jpeg',
+    videoUrl: '',
+    dubStudio: 'استوديو كلوفر وركس / ترجمة عربية',
+    voiceActors: ['رينتارو', 'كاوروكو', 'الأصدقاء'],
+    releaseDate: 'جاهزة للربط عبر درايف',
+    description: 'في يوم شتوي هادئ تتساقط فيه الثلوج الأولى، يتبادل رينتارو وكاوروكو الهدايا والكلمات الصادقة التي تختصر كل ما مرا به معاً من تحديات وبدايات جديدة.',
+    isComingSoon: true,
+  },
+  {
+    id: 'fragrant-flower-s1-ep12',
+    episodeNumber: 12,
+    title: 'الحلقة 12: حيث تزهر المشاعر بالكرامة (ختام الموسم)',
+    duration: '24:30',
+    thumbnail: '/assets/aistudio/IMG_8659_99c6f5bd.jpeg',
+    videoUrl: '',
+    dubStudio: 'استوديو كلوفر وركس / ترجمة عربية كاملة',
+    voiceActors: ['رينتارو تسوموغي', 'كاوروكو واغوري', 'جميع الشخصيات'],
+    releaseDate: 'جاهزة للربط عبر درايف',
+    description: 'الحلقة الختامية الكبرى للموسم الأول: يعبر رينتارو وكاوروكو بكل فخر عن احترامهما المتبادل وحبهما الصادق في مشهد مؤثر يُثبت أن الزهور العطرة تزهر حقاً بالكرامة والنقاء.',
+    isComingSoon: true,
+  },
+];
+
+export const ANIME_WORKS: DubSeries[] = [
+  {
+    id: 'the-fragrant-flower-blooms-with-dignity',
+    title: 'الزهرة تزهر بالكرامة',
+    originalTitle: 'The Fragrant Flower Blooms with Dignity (Kaoru Hana wa Rin to Saku)',
+    coverImage: '/assets/aistudio/IMG_8659_99c6f5bd.jpeg',
+    bannerImage: '/assets/aistudio/IMG_8659_99c6f5bd.jpeg',
+    genres: ['أنمي رومانسي', 'مدرسي وشبابي', 'دراما دافئة', 'مترجم للعربية'],
+    dubStudio: 'استوديو كلوفر وركس (CloverWorks) / ترجمة عربية احترافية',
+    director: 'مياكي ساتوشي / تأليف: ساكا ميكامي',
+    rating: 4.99,
+    episodesCount: 12,
+    category: 'anime',
+    synopsis: 'أنمي الرومانسية والمشاعر النبيلة الأيقوني! "رينتارو تسوموغي" فتى ضخم وهادئ ذو مظهر يوحي بالخشونة يرتاد ثانوية تشيدوري للبنين. بينما يعمل في مخبز عائلته الصغير، يلتقي بـ "كاوروكو واغوري"، الفتاة الرقيقة والمرحة التي تدرس في ثانوية كيكيو الراقية للبنات. على الرغم من الجدار النفسي والعداء التاريخي بين المدرستين، تنمو بينهما علاقة فريدة ومشاعر نقية تزهر بالاحترام والكرامة المتبادلة.',
+    seasons: [
+      {
+        id: 'fragrant-flower-season-1',
+        seasonNumber: 1,
+        title: 'الموسم الأول (12 حلقة كاملة)',
+        description: 'الموسم الأول الكامل - رحلة رينتارو وكاوروكو لكسر الحواجز وتحدي الأحكام المسبقة في قصة حب ونقاء تأسر القلوب.',
+        episodesCount: 12,
+        episodes: FRAGRANT_FLOWER_EPISODES,
+      },
+    ],
+    episodes: FRAGRANT_FLOWER_EPISODES,
+  },
+  {
+    id: 'naruto',
+    title: 'ناروتو',
+    originalTitle: 'NARUTO (The Complete Classic Journey)',
+    coverImage: '/assets/aistudio/IMG_8684_cea29b49.jpeg',
+    bannerImage: '/assets/aistudio/IMG_8684_cea29b49.jpeg',
+    genres: ['أنمي شونين', 'نينجا وفنون قتالية', 'مغامرات أسطورية وإثارة', 'مترجم / مدبلج للعربية'],
+    dubStudio: 'استوديو بيرو (Studio Pierrot) / ماساشي كيشيموتو',
+    director: 'هاييتو داتيه',
+    rating: 4.99,
+    episodesCount: 220,
+    category: 'anime',
+    synopsis: 'الأنمي الأسطوري الخالد الذي شكّل جيلاً كاملاً! "ناروتو أوزوماكي" نينجا يتيم من قرية كونوها يحمل في داخله وحش الكيوبي (الثعلب ذو الذيول التسعة). رغم نبذ أهل القرية له في طفولته، يعقد العزم بإصرار فولاذي على تحقيق حلمه بأن يصبح "الهوكاجي" - النينجا الأقوى في القرية لينال اعتراف الجميع. السلسلة الكلاسيكية الكاملة بجميع مواسمها الستة (220 حلقة) مقسمة بشكل منظم وجاهزة للربط والمشاهدة.',
+    seasons: NARUTO_ALL_SEASONS,
+    episodes: NARUTO_ALL_SEASONS[0].episodes,
+  },
+];
+
+// ----------------------------------------------------
+// MOVIES SECTION (قسم الأفلام السينمائية المخصص)
+// ----------------------------------------------------
+
+export const MOVIES_WORKS: DubSeries[] = [
+  {
+    id: 'spider-man-across-the-spider-verse',
+    title: 'سبايدرمان: أكروس ذا سبايدر فيرس',
+    originalTitle: 'Spider-Man: Across the Spider-Verse (Full Movie)',
+    coverImage: '/assets/aistudio/IMG_8636_fe40af1f.jpeg',
+    bannerImage: '/assets/aistudio/IMG_8636_fe40af1f.jpeg',
+    genres: ['أفلام سينمائية', 'أبطال خارقون', 'أكوان متعددة وإثارة', 'دبلجة رسمية فصحى'],
+    dubStudio: 'سوني بيكتشرز للرسوم المتحركة (الدبلجة العربية الرسمية)',
+    director: 'جواكيم دوس سانتوس، كيمب باورز، جاستن ك. تومسون',
+    rating: 4.99,
+    episodesCount: 1,
+    category: 'movie',
+    synopsis: 'التحفة السينمائية الكبرى الحائزة على إشادة النقاد العالمية! يعود مايلز موراليس في مغامرة ملحمية تأخذه عبر الأكوان المتعددة رفقة غوين ستايسي (سبايدر-وومن). هناك يلتقي بجمعية العناكب التي تحمي نسيج الزمكان بقيادة ميغيل أوهارا (سبايدرمان 2099). الفيلم مدبلج بالدبلجة العربية الرسمية الفصحى بأعلى جودة وصوت محيطي نقي.',
+    seasons: [
+      {
+        id: 'spiderverse-full-movie',
+        seasonNumber: 1,
+        title: 'الفيلم السينمائي الكامل',
+        description: 'الفيلم السينمائي الكامل مدبلج بالدبلجة العربية الرسمية الفصحى بأعلى جودة وصوت محيطي نقي.',
+        episodesCount: 1,
+        episodes: [
+          {
+            id: 'spiderverse-movie-ep1',
+            episodeNumber: 1,
+            title: 'الفيلم الكامل: سبايدرمان عبر الأكوان المتعددة',
+            duration: '02:20:00',
+            thumbnail: '/assets/aistudio/IMG_8636_fe40af1f.jpeg',
+            videoUrl: '',
+            dubStudio: 'سوني بيكتشرز للرسوم المتحركة',
+            voiceActors: ['مايلز موراليس (سبايدرمان)', 'غوين ستايسي (سبايدر-وومن)', 'ميغيل أوهارا (سبايدرمان 2099)', 'بيتر ب. باركر', 'سبوت', 'هوبي براون (سبايدر-بانك)'],
+            releaseDate: 'جاهز للربط عبر درايف',
+            description: 'الفيلم الكامل: يخوض مايلز موراليس مطاردة مذهلة عبر أبعاد نيو يورك ومومباتن ومقر جمعية العناكب لإنقاذ والده وتحدي القدر المحتوم.',
+            isComingSoon: true,
+          },
+        ],
+      },
+    ],
+    episodes: [
+      {
+        id: 'spiderverse-movie-ep1',
+        episodeNumber: 1,
+        title: 'الفيلم الكامل: سبايدرمان عبر الأكوان المتعددة',
+        duration: '02:20:00',
+        thumbnail: '/assets/aistudio/IMG_8636_fe40af1f.jpeg',
+        videoUrl: '',
+        dubStudio: 'سوني بيكتشرز للرسوم المتحركة',
+        voiceActors: ['مايلز موراليس (سبايدرمان)', 'غوين ستايسي (سبايدر-وومن)', 'ميغيل أوهارا (سبايدرمان 2099)', 'بيتر ب. باركر', 'سبوت', 'هوبي براون (سبايدر-بانك)'],
+        releaseDate: 'جاهز للربط عبر درايف',
+        description: 'الفيلم الكامل: يخوض مايلز موراليس مطاردة مذهلة عبر أبعاد نيو يورك ومومباتن ومقر جمعية العناكب لإنقاذ والده وتحدي القدر المحتوم.',
+        isComingSoon: true,
+      },
+    ],
+  },
+  {
+    id: 'spider-man-brand-new-day',
+    title: 'سبايدرمان: يوم جديد',
+    originalTitle: 'Spider-Man: Brand New Day (Official Movie)',
+    coverImage: '/assets/aistudio/IMG_8675_8208f427.jpeg',
+    bannerImage: '/assets/aistudio/IMG_8675_8208f427.jpeg',
+    genres: ['أفلام سينمائية', 'أبطال خارقون', 'مارفل', 'أكشن وإثارة', 'دبلجة رسمية'],
+    dubStudio: 'مارفل ستوديوز / كولومبيا بيكتشرز (دبلجة عربية)',
+    director: 'ديستن دانيال كريتون',
+    rating: 4.98,
+    episodesCount: 1,
+    category: 'movie',
+    synopsis: 'الفيلم السينمائي الجديد والمنتظر بشدة لسبايدرمان "يوم جديد" (Brand New Day)! بعد أحداث نسيان العالم لهوية بيتر باركر، يبدأ بيتر فصلاً جديداً ومصيرياً في شوارع نيويورك ببدلته الكلاسيكية لمواجهة تحديات وأعداء جدد في رحلة نضال بطولية ملحمية.',
+    seasons: [
+      {
+        id: 'spiderman-brand-new-day-season',
+        seasonNumber: 1,
+        title: 'الفيلم السينمائي الكامل',
+        description: 'الفيلم السينمائي الكامل لسبايدرمان يوم جديد بجودة أصلية فائقة بدون ضغط.',
+        episodesCount: 1,
+        episodes: [
+          {
+            id: 'spiderman-brand-new-day-ep1',
+            episodeNumber: 1,
+            title: 'الفيلم الكامل: سبايدرمان يوم جديد (Brand New Day)',
+            duration: '02:15:00',
+            thumbnail: '/assets/aistudio/IMG_8675_8208f427.jpeg',
+            videoUrl: '',
+            dubStudio: 'مارفل ستوديوز / كولومبيا بيكتشرز',
+            voiceActors: ['بيتر باركر (سبايدرمان)', 'إم جيه (ميشيل جونز)', 'نيد ليدز', 'الخصوم الجدد'],
+            releaseDate: 'جاهز للربط عبر درايف',
+            description: 'الفيلم السينمائي الكامل: يعود بيتر باركر بطلاً متفرغاً لحماية شوارع نيويورك بمهاراته الخارقة في بداية حقبة جديدة تماماً.',
+            isComingSoon: true,
+          },
+        ],
+      },
+    ],
+    episodes: [
+      {
+        id: 'spiderman-brand-new-day-ep1',
+        episodeNumber: 1,
+        title: 'الفيلم الكامل: سبايدرمان يوم جديد (Brand New Day)',
+        duration: '02:15:00',
+        thumbnail: '/assets/aistudio/IMG_8675_8208f427.jpeg',
+        videoUrl: '',
+        dubStudio: 'مارفل ستوديوز / كولومبيا بيكتشرز',
+        voiceActors: ['بيتر باركر (سبايدرمان)', 'إم جيه (ميشيل جونز)', 'نيد ليدز', 'الخصوم الجدد'],
+        releaseDate: 'جاهز للربط عبر درايف',
+        description: 'الفيلم السينمائي الكامل: يعود بيتر باركر بطلاً متفرغاً لحماية شوارع نيويورك بمهاراته الخارقة في بداية حقبة جديدة تماماً.',
+        isComingSoon: true,
+      },
+    ],
+  },
+  {
+    id: 'harry-potter-and-the-philosophers-stone',
+    title: 'هاري بوتر وحجر الفيلسوف',
+    originalTitle: "Harry Potter and the Philosopher's Stone",
+    coverImage: '/assets/aistudio/IMG_8676_5f80dec3.jpeg',
+    bannerImage: '/assets/aistudio/IMG_8676_5f80dec3.jpeg',
+    genres: ['أفلام سينمائية', 'فانتازيا وسحر', 'عالم السحرة هوغوورتس', 'مغامرات وإثارة'],
+    dubStudio: 'وارنر براذرز بيكتشرز (Warner Bros. Pictures)',
+    director: 'كريس كولومبوس / تأليف: ج. ك. رولينغ',
+    rating: 4.99,
+    episodesCount: 1,
+    category: 'movie',
+    synopsis: 'الفيلم الأسطوري الأول الذي انطلقت منه أعظم ملحمة سحرية في تاريخ السينما! يكتشف الصبي اليتيم "هاري بوتر" في عيد ميلاده الحادي عشر أنه ساحر حقيقي ورث قوى استثنائية، ويتلقى دعوة رسمية للالتحاق بمدرسة هوغوورتس للسحر والشعوذة. هناك يلتقي برون ويزلي وهيرميون غرينجر، ويبدأون رحلة استكشاف أسرار حجر الفيلسوف ومواجهة لورد فولدمورت.',
+    seasons: [
+      {
+        id: 'hp-philosophers-stone-season',
+        seasonNumber: 1,
+        title: 'الفيلم السينمائي الكامل',
+        description: 'الفيلم السينمائي الكامل لهاري بوتر وحجر الفيلسوف بجودة أصلية فائقة ومجهز للربط برابط Google Drive.',
+        episodesCount: 1,
+        episodes: [
+          {
+            id: 'hp-philosophers-stone-ep1',
+            episodeNumber: 1,
+            title: 'الفيلم الكامل: هاري بوتر وحجر الفيلسوف',
+            duration: '02:32:00',
+            thumbnail: '/assets/aistudio/IMG_8676_5f80dec3.jpeg',
+            videoUrl: '',
+            dubStudio: 'وارنر براذرز بيكتشرز',
+            voiceActors: ['دانيال رادكليف (هاري بوتر)', 'روبرت غرينت (رون ويزلي)', 'إيما واتسون (هيرميون غرينجر)', 'روبي كولترين (هاغريد)', 'آلان ريكمان (سنيب)', 'ريتشارد هاريس (دمبلدور)'],
+            releaseDate: 'جاهز للربط عبر درايف',
+            description: 'الفيلم السينمائي الكامل: يبدأ هاري بوتر سنته الأولى في هوغوورتس، ويتعرف على أصدقائه الجدد ويخوضون مغامرة خطيرة لكشف لغز حجر الفيلسوف.',
+            isComingSoon: true,
+          },
+        ],
+      },
+    ],
+    episodes: [
+      {
+        id: 'hp-philosophers-stone-ep1',
+        episodeNumber: 1,
+        title: 'الفيلم الكامل: هاري بوتر وحجر الفيلسوف',
+        duration: '02:32:00',
+        thumbnail: '/assets/aistudio/IMG_8676_5f80dec3.jpeg',
+        videoUrl: '',
+        dubStudio: 'وارنر براذرز بيكتشرز',
+        voiceActors: ['دانيال رادكليف (هاري بوتر)', 'روبرت غرينت (رون ويزلي)', 'إيما واتسون (هيرميون غرينجر)', 'روبي كولترين (هاغريد)', 'آلان ريكمان (سنيب)', 'ريتشارد هاريس (دمبلدور)'],
+        releaseDate: 'جاهز للربط عبر درايف',
+        description: 'الفيلم السينمائي الكامل: يبدأ هاري بوتر سنته الأولى في هوغوورتس، ويتعرف على أصدقائه الجدد ويخوضون مغامرة خطيرة لكشف لغز حجر الفيلسوف.',
+        isComingSoon: true,
+      },
+    ],
+  },
+  {
+    id: 'harry-potter-and-the-chamber-of-secrets',
+    title: 'هاري بوتر وحجرة الأسرار',
+    originalTitle: 'Harry Potter and the Chamber of Secrets',
+    coverImage: '/assets/aistudio/IMG_8695_2aecc1fe.jpeg',
+    bannerImage: '/assets/aistudio/IMG_8695_2aecc1fe.jpeg',
+    genres: ['أفلام سينمائية', 'فانتازيا وسحر', 'عالم السحرة هوغوورتس', 'غموض ومغامرات'],
+    dubStudio: 'وارنر براذرز بيكتشرز (Warner Bros. Pictures)',
+    director: 'كريس كولومبوس / تأليف: ج. ك. رولينغ',
+    rating: 4.98,
+    episodesCount: 1,
+    category: 'movie',
+    synopsis: 'الجزء الثاني من الملحمة السحرية العالمية! يعود هاري بوتر في عامه الثاني إلى مدرسة هوغوورتس رغم تحذيرات قزم المنزل "دوبي"، ليجد المدرسة مهددة بعد فتح "حجرة الأسرار" الأسطورية وتحجّر الطلاب على يد وحش غامض يتربص في الممرات، فيتعاون هاري مع رون وهيرميون لكشف سر مذكرات توم ريدل ومواجهة الباسيليسك.',
+    seasons: [
+      {
+        id: 'hp-chamber-of-secrets-season',
+        seasonNumber: 1,
+        title: 'الفيلم السينمائي الكامل',
+        description: 'الفيلم السينمائي الكامل لهاري بوتر وحجرة الأسرار بجودة أصلية فائقة ومجهز للربط برابط Google Drive.',
+        episodesCount: 1,
+        episodes: [
+          {
+            id: 'hp-chamber-of-secrets-ep1',
+            episodeNumber: 1,
+            title: 'الفيلم الكامل: هاري بوتر وحجرة الأسرار',
+            duration: '02:41:00',
+            thumbnail: '/assets/aistudio/IMG_8695_2aecc1fe.jpeg',
+            videoUrl: '',
+            dubStudio: 'وارنر براذرز بيكتشرز',
+            voiceActors: ['دانيال رادكليف (هاري بوتر)', 'روبرت غرينت (رون ويزلي)', 'إيما واتسون (هيرميون غرينجر)', 'كينيث براناه (غيلديروي لوكهارت)', 'آلان ريكمان (سنيب)', 'ريتشارد هاريس (دمبلدور)'],
+            releaseDate: 'جاهز للربط عبر درايف',
+            description: 'الفيلم السينمائي الكامل: يخوض هاري ورون وهيرميون مغامرة غامضة في سنتهم الثانية لكشف هوية وريث سليذرين وإغلاق حجرة الأسرار للأبد.',
+            isComingSoon: true,
+          },
+        ],
+      },
+    ],
+    episodes: [
+      {
+        id: 'hp-chamber-of-secrets-ep1',
+        episodeNumber: 1,
+        title: 'الفيلم الكامل: هاري بوتر وحجرة الأسرار',
+        duration: '02:41:00',
+        thumbnail: '/assets/aistudio/IMG_8695_2aecc1fe.jpeg',
+        videoUrl: '',
+        dubStudio: 'وارنر براذرز بيكتشرز',
+        voiceActors: ['دانيال رادكليف (هاري بوتر)', 'روبرت غرينت (رون ويزلي)', 'إيما واتسون (هيرميون غرينجر)', 'كينيث براناه (غيلديروي لوكهارت)', 'آلان ريكمان (سنيب)', 'ريتشارد هاريس (دمبلدور)'],
+        releaseDate: 'جاهز للربط عبر درايف',
+        description: 'الفيلم السينمائي الكامل: يخوض هاري ورون وهيرميون مغامرة غامضة في سنتهم الثانية لكشف هوية وريث سليذرين وإغلاق حجرة الأسرار للأبد.',
+        isComingSoon: true,
+      },
+    ],
+  },
+];
+
+// All Combined media works for admin management and global search
+export const ALL_MEDIA_WORKS: DubSeries[] = [
+  ...DUBBED_WORKS,
+  ...ANIME_WORKS,
+  ...MOVIES_WORKS,
+];
+
+// Ensure all series have top-level episodes synchronized with Season 1
+ALL_MEDIA_WORKS.forEach((series) => {
+  if (!series.episodes || series.episodes.length === 0) {
+    series.episodes = series.seasons[0]?.episodes || [];
+  }
+});
+

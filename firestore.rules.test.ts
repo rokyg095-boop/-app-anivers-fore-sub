@@ -1,0 +1,97 @@
+/**
+ * Security Rules Verification Suite (Dirty Dozen + Legitimate Flows)
+ * Intended for validation against Firebase Rules Unit Testing / Emulator.
+ */
+export const DIRTY_DOZEN_CASES = [
+  {
+    name: '1. Unauthenticated write to episodeSources',
+    auth: null,
+    op: 'set',
+    path: 'episodeSources/at-s1-ep1',
+    expect: 'PERMISSION_DENIED',
+  },
+  {
+    name: '2. Verified non-admin viewer write to episodeSources',
+    auth: { uid: 'viewer-1', token: { email: 'viewer@example.com', email_verified: true } },
+    op: 'set',
+    path: 'episodeSources/at-s1-ep1',
+    expect: 'PERMISSION_DENIED',
+  },
+  {
+    name: '3. Email spoofing (admin email with email_verified=false)',
+    auth: { uid: 'spoof-1', token: { email: 'rokyg095@gmail.com', email_verified: false } },
+    op: 'set',
+    path: 'episodeSources/at-s1-ep1',
+    expect: 'PERMISSION_DENIED',
+  },
+  {
+    name: '4. Shadow/ghost field injection',
+    auth: { uid: 'admin-1', token: { email: 'rokyg095@gmail.com', email_verified: true } },
+    op: 'set',
+    path: 'episodeSources/at-s1-ep1',
+    data: { ghostField: true },
+    expect: 'PERMISSION_DENIED',
+  },
+  {
+    name: '5. Identity spoofing in updatedByUid',
+    auth: { uid: 'admin-1', token: { email: 'rokyg095@gmail.com', email_verified: true } },
+    op: 'set',
+    path: 'episodeSources/at-s1-ep1',
+    data: { updatedByUid: 'other-uid' },
+    expect: 'PERMISSION_DENIED',
+  },
+  {
+    name: '6. Document ID poisoning (>128 chars)',
+    auth: { uid: 'admin-1', token: { email: 'rokyg095@gmail.com', email_verified: true } },
+    op: 'set',
+    path: `episodeSources/${'a'.repeat(200)}`,
+    expect: 'PERMISSION_DENIED',
+  },
+  {
+    name: '7. Oversized driveLink (>1000 chars)',
+    auth: { uid: 'admin-1', token: { email: 'rokyg095@gmail.com', email_verified: true } },
+    op: 'set',
+    path: 'episodeSources/at-s1-ep1',
+    data: { driveLink: `https://drive.google.com/${'x'.repeat(1100)}` },
+    expect: 'PERMISSION_DENIED',
+  },
+  {
+    name: '8. Unbounded backupDriveLinks (>10 items)',
+    auth: { uid: 'admin-1', token: { email: 'rokyg095@gmail.com', email_verified: true } },
+    op: 'set',
+    path: 'episodeSources/at-s1-ep1',
+    data: { backupDriveLinks: new Array(11).fill({ id: 'b', url: 'https://drive.google.com/uc?id=1' }) },
+    expect: 'PERMISSION_DENIED',
+  },
+  {
+    name: '9. Invalid backupDriveLinks element type (string instead of map)',
+    auth: { uid: 'admin-1', token: { email: 'rokyg095@gmail.com', email_verified: true } },
+    op: 'set',
+    path: 'episodeSources/at-s1-ep1',
+    data: { backupDriveLinks: ['invalid-string-entry'] },
+    expect: 'PERMISSION_DENIED',
+  },
+  {
+    name: '10. Client-forged createdAt timestamp on create',
+    auth: { uid: 'admin-1', token: { email: 'rokyg095@gmail.com', email_verified: true } },
+    op: 'set',
+    path: 'episodeSources/at-s1-ep1',
+    data: { createdAt: '2020-01-01T00:00:00Z' },
+    expect: 'PERMISSION_DENIED',
+  },
+  {
+    name: '11. Self-assigned admin document write by non-admin',
+    auth: { uid: 'attacker-1', token: { email: 'attacker@example.com', email_verified: true } },
+    op: 'set',
+    path: 'admins/attacker-1',
+    data: { uid: 'attacker-1', role: 'admin' },
+    expect: 'PERMISSION_DENIED',
+  },
+  {
+    name: '12. Unauthorized list on admins collection',
+    auth: { uid: 'viewer-1', token: { email: 'viewer@example.com', email_verified: true } },
+    op: 'list',
+    path: 'admins',
+    expect: 'PERMISSION_DENIED',
+  },
+];

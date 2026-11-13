@@ -1,0 +1,292 @@
+{
+  "entities": {
+    "EpisodeSource": {
+      "title": "EpisodeSource",
+      "description": "Public episode or movie streaming link metadata saved permanently in Firestore (supports multi-account Google Drive primary and backup links plus subtitle tracks).",
+      "type": "object",
+      "properties": {
+        "episodeId": {
+          "type": "string",
+          "description": "Unique episode or movie identifier matching the catalog entry.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "driveLink": {
+          "type": "string",
+          "description": "Normalized primary Google Drive direct link or streaming URL.",
+          "minLength": 0,
+          "maxLength": 1000
+        },
+        "videoUrl": {
+          "type": "string",
+          "description": "Primary direct playback URL.",
+          "minLength": 0,
+          "maxLength": 1000
+        },
+        "accountLabel": {
+          "type": "string",
+          "description": "Optional label identifying which Google Drive account hosts the primary file.",
+          "minLength": 0,
+          "maxLength": 120
+        },
+        "backupDriveLinks": {
+          "type": "array",
+          "description": "Optional list (max 10) of secondary/mirror Google Drive links from other accounts."
+        },
+        "subtitles": {
+          "type": "array",
+          "description": "Optional list (max 10) of subtitle track configurations."
+        },
+        "isPublic": {
+          "type": "boolean",
+          "description": "Explicit visibility flag allowing visitors to stream public episodes."
+        },
+        "updatedByUid": {
+          "type": "string",
+          "description": "UID of the verified admin who saved this episode link.",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server-enforced creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server-enforced last update timestamp."
+        }
+      },
+      "required": [
+        "episodeId",
+        "driveLink",
+        "videoUrl",
+        "isPublic",
+        "updatedByUid",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "CustomWork": {
+      "title": "CustomWork",
+      "description": "Admin-created anime, movie, or dubbed series entry saved permanently in Firestore.",
+      "type": "object",
+      "properties": {
+        "workId": {
+          "type": "string",
+          "description": "Unique identifier for the custom work.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "category": {
+          "type": "string",
+          "description": "Target catalog section.",
+          "enum": ["anime", "movie", "dubbed"],
+          "minLength": 1,
+          "maxLength": 20
+        },
+        "title": {
+          "type": "string",
+          "description": "Display title in Arabic.",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "originalTitle": {
+          "type": "string",
+          "description": "Optional original or English title.",
+          "minLength": 0,
+          "maxLength": 200
+        },
+        "coverImage": {
+          "type": "string",
+          "description": "Cover image URL or compressed JPEG data URI.",
+          "minLength": 1,
+          "maxLength": 400000
+        },
+        "bannerImage": {
+          "type": "string",
+          "description": "Optional wide banner image URL or compressed data URI.",
+          "minLength": 0,
+          "maxLength": 400000
+        },
+        "genres": {
+          "type": "array",
+          "description": "Non-empty list of genres (1 to 8 items)."
+        },
+        "dubStudio": {
+          "type": "string",
+          "description": "Optional studio or label.",
+          "minLength": 0,
+          "maxLength": 120
+        },
+        "rating": {
+          "type": "number",
+          "description": "Rating from 0 to 10."
+        },
+        "seasonsCount": {
+          "type": "integer",
+          "description": "Number of seasons (1 to 30)."
+        },
+        "episodesCount": {
+          "type": "integer",
+          "description": "Total number of episodes (1 to 300)."
+        },
+        "synopsis": {
+          "type": "string",
+          "description": "Story description shown in the catalog.",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "isPublic": {
+          "type": "boolean",
+          "description": "Explicit visibility flag allowing visitors to view this catalog entry."
+        },
+        "updatedByUid": {
+          "type": "string",
+          "description": "UID of the verified admin who created or updated this work.",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server-enforced creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server-enforced last update timestamp."
+        }
+      },
+      "required": [
+        "workId",
+        "category",
+        "title",
+        "originalTitle",
+        "coverImage",
+        "bannerImage",
+        "genres",
+        "dubStudio",
+        "rating",
+        "seasonsCount",
+        "episodesCount",
+        "synopsis",
+        "isPublic",
+        "updatedByUid",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "SiteAccessGate": {
+      "title": "SiteAccessGate",
+      "description": "Hashed invite passcode configuration controlling site entry gate.",
+      "type": "object",
+      "properties": {
+        "settingId": {
+          "type": "string",
+          "enum": ["accessGate"],
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether the site access code gate is active."
+        },
+        "passcodeHash": {
+          "type": "string",
+          "description": "SHA-256 hex digest of the entry passcode.",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "gateVersion": {
+          "type": "integer",
+          "description": "Monotonic version incremented on passcode updates to invalidate old unlocks."
+        },
+        "isPublic": {
+          "type": "boolean",
+          "description": "Allows single-doc get verification without exposing raw passcode."
+        },
+        "updatedByUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "settingId",
+        "enabled",
+        "passcodeHash",
+        "gateVersion",
+        "isPublic",
+        "updatedByUid",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Trusted administrator account record authorized to manage episode links and custom works.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the administrator.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "role": {
+          "type": "string",
+          "description": "Explicit admin role.",
+          "enum": ["admin"],
+          "minLength": 1,
+          "maxLength": 20
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server-enforced creation timestamp."
+        }
+      },
+      "required": ["uid", "role", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/episodeSources/{episodeId}": {
+      "schema": {
+        "$ref": "#/entities/EpisodeSource"
+      },
+      "description": "Stores permanent streaming links and subtitles per episode/movie ID."
+    },
+    "/customWorks/{workId}": {
+      "schema": {
+        "$ref": "#/entities/CustomWork"
+      },
+      "description": "Stores admin-added anime, movies, and dubbed series metadata."
+    },
+    "/siteSettings/{settingId}": {
+      "schema": {
+        "$ref": "#/entities/SiteAccessGate"
+      },
+      "description": "Stores hashed invite access gate configuration."
+    },
+    "/admins/{userId}": {
+      "schema": {
+        "$ref": "#/entities/AdminUser"
+      },
+      "description": "Stores authorized administrator UIDs."
+    }
+  }
+}

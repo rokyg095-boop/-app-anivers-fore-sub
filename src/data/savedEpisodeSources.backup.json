@@ -1,0 +1,23 @@
+{
+  "at-s1-ep17-18": {
+    "driveLink": "https://drive.google.com/uc?export=download&id=1L2Rm6ost9qFScRBTj_p80PNyZRxznDY5",
+    "videoUrl": "https://drive.google.com/uc?export=download&id=1L2Rm6ost9qFScRBTj_p80PNyZRxznDY5",
+    "subtitles": [
+      {
+        "id": "sub-ar",
+        "lang": "ar",
+        "label": "العربية (Arabic)",
+        "src": "/subtitles/arabic.vtt",
+        "default": true
+      },
+      {
+        "id": "sub-en",
+        "lang": "en",
+        "label": "English (الإنجليزية)",
+        "src": "/subtitles/english.vtt",
+        "default": false
+      }
+    ],
+    "updatedAt": "2026-11-13T18:49:45.861Z"
+  }
+}

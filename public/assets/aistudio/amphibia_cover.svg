@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 900" width="100%" height="100%">
+  <defs>
+    <linearGradient id="amphibiaBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#062b19" />
+      <stop offset="40%" stop-color="#0b4528" />
+      <stop offset="80%" stop-color="#146039" />
+      <stop offset="100%" stop-color="#071d12" />
+    </linearGradient>
+    <radialGradient id="swampGlow" cx="50%" cy="40%" r="50%">
+      <stop offset="0%" stop-color="#55e6a0" stop-opacity="0.4" />
+      <stop offset="70%" stop-color="#10b981" stop-opacity="0.1" />
+      <stop offset="100%" stop-color="#000000" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="titleGold" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#fde047" />
+      <stop offset="50%" stop-color="#fbbf24" />
+      <stop offset="100%" stop-color="#d97706" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="600" height="900" fill="url(#amphibiaBg)" />
+  <circle cx="300" cy="400" r="380" fill="url(#swampGlow)" />
+
+  <!-- Mystical Mushroom & Swamp Vines silhouettes -->
+  <path d="M 0 900 Q 150 700 300 760 T 600 800 L 600 900 Z" fill="#04160d" />
+  <path d="M 0 900 Q 200 780 400 820 T 600 900 Z" fill="#020a06" />
+
+  <!-- Ancient Music Box Glow -->
+  <g transform="translate(300, 480)">
+    <circle cx="0" cy="0" r="85" fill="#38bdf8" opacity="0.25" />
+    <polygon points="0,-40 35,-10 35,30 0,55 -35,30 -35,-10" fill="#0ea5e9" stroke="#bae6fd" stroke-width="4" />
+    <!-- Three Gems (Pink, Blue, Green) -->
+    <circle cx="-16" cy="-5" r="9" fill="#ec4899" stroke="#fff" stroke-width="2" />
+    <circle cx="0" cy="22" r="9" fill="#38bdf8" stroke="#fff" stroke-width="2" />
+    <circle cx="16" cy="-5" r="9" fill="#22c55e" stroke="#fff" stroke-width="2" />
+  </g>
+
+  <!-- Title Badge -->
+  <rect x="180" y="70" width="240" height="42" rx="21" fill="#064e3b" stroke="#34d399" stroke-width="2" />
+  <text x="300" y="97" font-family="'Cairo', sans-serif" font-weight="bold" font-size="20" fill="#a7f3d0" text-anchor="middle">ديزني بالعربية · الدبلجة الرسمية</text>
+
+  <!-- Main Title -->
+  <text x="300" y="240" font-family="'Cairo', sans-serif" font-weight="900" font-size="76" fill="url(#titleGold)" text-anchor="middle" filter="drop-shadow(0 8px 16px rgba(0,0,0,0.8))">إمفيبيا</text>
+  <text x="300" y="295" font-family="'Cairo', sans-serif" font-weight="700" font-size="34" fill="#6ee7b7" text-anchor="middle">عالم البرمائيات العجيب</text>
+  <text x="300" y="335" font-family="monospace" font-weight="bold" font-size="20" fill="#94a3b8" text-anchor="middle" letter-spacing="4">AMPHIBIA · SEASON 1</text>
+
+  <!-- Subtitle Character Pills -->
+  <g transform="translate(300, 680)">
+    <rect x="-240" y="0" width="480" height="70" rx="16" fill="#022c22" stroke="#059669" stroke-width="2" />
+    <text x="0" y="42" font-family="'Cairo', sans-serif" font-weight="bold" font-size="20" fill="#f8fafc" text-anchor="middle">آن بونشوي · سبيرج بلانتار · بولي وهوب بوب</text>
+  </g>
+
+  <!-- Bottom Season 1 Badge -->
+  <rect x="200" y="810" width="200" height="46" rx="12" fill="#10b981" />
+  <text x="300" y="841" font-family="'Cairo', sans-serif" font-weight="bold" font-size="22" fill="#022c22" text-anchor="middle">الموسم الأول الكامل</text>
+</svg>
