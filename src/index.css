@@ -1,6 +1,13 @@
 @import "tailwindcss";
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* In-between neutral shades used across the UI (bg-neutral-750, border-neutral-850, ...).
+   Tailwind 4 doesn't ship these, so without them those classes generate no CSS. */
+@theme {
+  --color-neutral-750: oklch(32% 0 0); /* between neutral-700 (37.1%) and neutral-800 (26.9%) */
+  --color-neutral-850: oklch(23.7% 0 0); /* between neutral-800 (26.9%) and neutral-900 (20.5%) */
+}
+
 @layer base {
   body {
     font-family: 'Tajawal', 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;

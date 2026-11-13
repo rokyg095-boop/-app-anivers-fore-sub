@@ -20,12 +20,20 @@ import { DubSeriesCard } from './components/DubSeriesCard.tsx';
 import { DubSeriesDetailModal } from './components/DubSeriesDetailModal.tsx';
 import { VideoPlayerModal } from './components/VideoPlayerModal.tsx';
 import { ComicDetailModal } from './components/ComicDetailModal.tsx';
-import { AdminMediaDashboard } from './components/AdminMediaDashboard.tsx';
-import { AdminCreateWorkModal } from './components/AdminCreateWorkModal.tsx';
+import { BackToTopButton } from './components/BackToTopButton.tsx';
+
+// Admin-only screens are split into separate chunks: regular visitors never download their code.
+const AdminMediaDashboard = React.lazy(() =>
+  import('./components/AdminMediaDashboard.tsx').then((m) => ({ default: m.AdminMediaDashboard }))
+);
+const AdminCreateWorkModal = React.lazy(() =>
+  import('./components/AdminCreateWorkModal.tsx').then((m) => ({ default: m.AdminCreateWorkModal }))
+);
 import { AccessGateScreen } from './components/AccessGateScreen.tsx';
 import {
   syncEpisodeSourcesFromServer,
   attachRealtimeCloudListener,
+  isEpisodePlayable,
   SOURCES_UPDATED_EVENT,
 } from './utils/videoSource.ts';
 import {
@@ -65,19 +73,80 @@ import {
   Plus
 } from 'lucide-react';
 
+function isAdminEntryHash(): boolean {
+  return typeof window !== 'undefined' && window.location.hash.toLowerCase() === '#admin';
+}
+
+// Background retries when Firestore doesn't answer the access-gate read (timeout → 'fallback', or a thrown error)
+const GATE_RETRY_DELAYS_MS = [1500, 4000, 8000];
+// Last access-gate config that Firestore actually confirmed. Used only to let an already-unlocked
+// visitor in immediately on the next visit; the gate itself is never shown from this cached copy.
+const GATE_CONFIG_CACHE_KEY = 'aniverse_access_gate_config_cache_v1';
+
+function readCachedGateConfig(): AccessGateConfig | null {
+  try {
+    const raw = window.localStorage.getItem(GATE_CONFIG_CACHE_KEY);
+    if (!raw) return null;
+    const c = JSON.parse(raw) as Partial<AccessGateConfig>;
+    if (
+      typeof c.enabled !== 'boolean' ||
+      typeof c.passcodeHash !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(c.passcodeHash) ||
+      typeof c.gateVersion !== 'number' ||
+      (c.source !== 'cloud' && c.source !== 'default')
+    ) {
+      return null;
+    }
+    return {
+      enabled: c.enabled,
+      passcodeHash: c.passcodeHash,
+      gateVersion: c.gateVersion,
+      source: c.source,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedGateConfig(cfg: AccessGateConfig): void {
+  if (cfg.source === 'fallback') return;
+  try {
+    window.localStorage.setItem(GATE_CONFIG_CACHE_KEY, JSON.stringify(cfg));
+  } catch {
+    // Storage unavailable (private mode etc.) — the cache is only an optimization
+  }
+}
+
+function getInitialGateConfig(): AccessGateConfig {
+  return readCachedGateConfig() || { ...getDefaultAccessGateConfig(), source: 'fallback' };
+}
+
+function getAllSeriesEpisodes(series: DubSeries): DubEpisode[] {
+  return series.seasons && series.seasons.length > 0
+    ? series.seasons.flatMap((s) => s.episodes || [])
+    : series.episodes;
+}
+
 export default function App() {
   const [currentTab, setCurrentTab] = useState<NavTabType>('home');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedGenre, setSelectedGenre] = useState<string>('all');
   const [isAdminOpen, setIsAdminOpen] = useState<boolean>(false);
   const [isOwnerAdmin, setIsOwnerAdmin] = useState<boolean>(false);
+  // Hidden owner entry: open the site with "#admin" at the end of the URL (works on phones too),
+  // or press Ctrl+Shift+A. Nothing admin-related is shown to regular visitors otherwise.
+  const [ownerEntryRequested, setOwnerEntryRequested] = useState<boolean>(isAdminEntryHash);
   const [authReadyUser, setAuthReadyUser] = useState<boolean>(false);
-  const [gateConfig, setGateConfig] = useState<AccessGateConfig>(() =>
-    getDefaultAccessGateConfig()
-  );
+  // Starts from the last Firestore-confirmed config (or an 'unknown' fallback) until Firestore answers.
+  const [gateConfig, setGateConfig] = useState<AccessGateConfig>(getInitialGateConfig);
   const [isUnlockedLocally, setIsUnlockedLocally] = useState<boolean>(() =>
-    isAccessUnlockedLocally(getDefaultAccessGateConfig())
+    isAccessUnlockedLocally(getInitialGateConfig())
   );
+  // True once Firestore has given an authoritative answer ('cloud' or 'default'). The passcode screen
+  // is only rendered after that, so a guessed default config can never reject the real code.
+  const [gateSettled, setGateSettled] = useState<boolean>(false);
+  const [gateLoadFailed, setGateLoadFailed] = useState<boolean>(false);
+  const [gateRetryNonce, setGateRetryNonce] = useState<number>(0);
   const [createWorkCategory, setCreateWorkCategory] = useState<CustomWorkCategory | null>(null);
   const [adminPreselect, setAdminPreselect] = useState<{
     seriesId?: string;
@@ -136,9 +205,13 @@ export default function App() {
 
   const [, setSourcesTick] = useState<number>(0);
 
-  const canAccessSite = !gateConfig.enabled || isUnlockedLocally || isOwnerAdmin;
+  // A config that isn't confirmed by Firestore ('fallback') never grants access. A cached confirmed
+  // config lets an already-unlocked visitor straight in while the fresh read is still in flight.
+  const isGateUnlocked =
+    gateConfig.source !== 'fallback' && (!gateConfig.enabled || isUnlockedLocally);
+  const canAccessSite = isGateUnlocked || isOwnerAdmin;
 
-  // Initialize Auth & Access Gate configuration first
+  // Initialize Auth & Access Gate listeners first
   React.useEffect(() => {
     let active = true;
 
@@ -148,25 +221,15 @@ export default function App() {
       setIsOwnerAdmin(Boolean(ready && user && isVerifiedAdminUser(user)));
     });
 
-    void fetchAccessGateConfig()
-      .then((cfg) => {
-        if (!active) return;
-        setGateConfig(cfg);
-        setIsUnlockedLocally(isAccessUnlockedLocally(cfg));
-      })
-      .catch((err) => {
-        console.error('Access gate load failed:', err);
-        if (!active) return;
-        const fallback = getDefaultAccessGateConfig();
-        setGateConfig(fallback);
-        setIsUnlockedLocally(isAccessUnlockedLocally(fallback));
-      });
-
     const handleGateUpdated = (e: Event) => {
       const customEvent = e as CustomEvent<AccessGateConfig | undefined>;
       if (customEvent.detail) {
         setGateConfig(customEvent.detail);
         setIsUnlockedLocally(isAccessUnlockedLocally(customEvent.detail));
+        if (customEvent.detail.source !== 'fallback') {
+          setGateSettled(true);
+          writeCachedGateConfig(customEvent.detail);
+        }
       } else {
         setGateConfig((current) => {
           setIsUnlockedLocally(isAccessUnlockedLocally(current));
@@ -182,6 +245,50 @@ export default function App() {
       window.removeEventListener(ACCESS_GATE_UPDATED_EVENT, handleGateUpdated);
     };
   }, []);
+
+  // Load the access-gate config from Firestore. A timeout ('fallback') or a read error is retried in
+  // the background instead of being trusted; the retry button on the loader restarts this effect.
+  React.useEffect(() => {
+    let active = true;
+    let attempt = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const scheduleRetry = () => {
+      if (!active) return;
+      if (attempt < GATE_RETRY_DELAYS_MS.length) {
+        retryTimer = setTimeout(load, GATE_RETRY_DELAYS_MS[attempt]);
+        attempt += 1;
+      } else {
+        setGateLoadFailed(true);
+      }
+    };
+
+    const load = () => {
+      fetchAccessGateConfig()
+        .then((cfg) => {
+          if (!active) return;
+          if (cfg.source === 'fallback') {
+            scheduleRetry();
+            return;
+          }
+          setGateConfig(cfg);
+          setIsUnlockedLocally(isAccessUnlockedLocally(cfg));
+          setGateSettled(true);
+          setGateLoadFailed(false);
+          writeCachedGateConfig(cfg);
+        })
+        .catch((err) => {
+          console.error('Access gate load failed:', err);
+          scheduleRetry();
+        });
+    };
+
+    load();
+    return () => {
+      active = false;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
+  }, [gateRetryNonce]);
 
   // Sync saved episode links + custom works ONLY after site access is unlocked
   React.useEffect(() => {
@@ -221,12 +328,112 @@ export default function App() {
     };
   }, [canAccessSite, authReadyUser]);
 
+  // Hidden owner entry via "#admin" in the URL
+  React.useEffect(() => {
+    const handleHashChange = () => {
+      if (isAdminEntryHash()) setOwnerEntryRequested(true);
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
+
+  React.useEffect(() => {
+    if (!ownerEntryRequested || !canAccessSite) return;
+    setIsAdminOpen(true);
+    setOwnerEntryRequested(false);
+    if (isAdminEntryHash()) {
+      // Remove "#admin" so it isn't left in the address bar or shared links
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+  }, [ownerEntryRequested, canAccessSite]);
+
+  // Whenever the admin dashboard opens (footer, player button, Ctrl+Shift+A, "#admin") close the video
+  // player so its keyboard shortcuts and audio don't keep running under the dashboard. Its series/episode
+  // are copied into adminPreselect first so the dashboard still opens on that episode.
+  React.useEffect(() => {
+    if (!isAdminOpen || !activeVideoSession) return;
+    setAdminPreselect((prev) => ({
+      seriesId: prev.seriesId || activeVideoSession.series.id,
+      episodeId: prev.episodeId || activeVideoSession.episode.id,
+    }));
+    setActiveVideoSession(null);
+  }, [isAdminOpen, activeVideoSession]);
+
+  // Same for the comic reader: its window key handler would otherwise keep reacting under the dashboard
+  React.useEffect(() => {
+    if (isAdminOpen && activeReadingSession) setActiveReadingSession(null);
+  }, [isAdminOpen, activeReadingSession]);
+
+  // Every tab switch (navbar, footer, "view all" links) starts at the top of the new page
+  const goToTab = (tab: NavTabType) => {
+    setCurrentTab(tab);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   const allDubbedWorks = [...DUBBED_WORKS, ...getCustomSeriesByCategory('dubbed')];
 
+  // Hero "watch the dubbed version": the Adventure Time dub when it has something playable
+  const adventureTimeDub = DUBBED_WORKS.find((s) => s.id === 'adventure-time-dub');
+  const heroDubSeries =
+    adventureTimeDub && getAllSeriesEpisodes(adventureTimeDub).some((e) => isEpisodePlayable(e))
+      ? adventureTimeDub
+      : gardenWallSeries;
+
+  // Availability shown on the home page / dubbed tab, derived from the data and admin-saved links
+  const gardenWallAllEpisodes = getAllSeriesEpisodes(gardenWallSeries);
+  const gardenWallPlayable = gardenWallAllEpisodes.filter((ep) => isEpisodePlayable(ep));
+  const featuredAnime = ANIME_WORKS[0];
+  const featuredAnimeEpisode = getAllSeriesEpisodes(featuredAnime).find((ep) => isEpisodePlayable(ep));
+  const featuredMovie = MOVIES_WORKS[0];
+  const featuredMovieEpisode = featuredMovie.episodes[0] || featuredMovie.seasons[0]?.episodes[0];
+  const featuredMoviePlayable = isEpisodePlayable(featuredMovieEpisode);
+  const openFeaturedMovie = () => {
+    if (featuredMoviePlayable) {
+      setActiveVideoSession({ episode: featuredMovieEpisode, series: featuredMovie });
+    } else {
+      setSelectedDubForDetail(featuredMovie);
+    }
+  };
+
   if (!canAccessSite) {
+    if (!gateSettled) {
+      // Neutral loader while the access settings load — never a passcode form built on a guessed config
+      return (
+        <div
+          className="min-h-screen bg-neutral-950 text-neutral-100 flex items-center justify-center p-4"
+          dir="rtl"
+        >
+          <div className="flex flex-col items-center gap-4 text-center max-w-sm">
+            {gateLoadFailed ? (
+              <>
+                <p className="text-sm text-neutral-300 leading-relaxed">
+                  تعذر الاتصال بالخادم للتحقق من إعدادات الدخول. تأكد من اتصالك بالإنترنت ثم أعد المحاولة.
+                </p>
+                <button
+                  onClick={() => {
+                    setGateLoadFailed(false);
+                    setGateRetryNonce((n) => n + 1);
+                  }}
+                  className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs rounded-xl transition-colors cursor-pointer"
+                >
+                  إعادة المحاولة
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="w-10 h-10 rounded-full border-2 border-neutral-800 border-t-rose-500 animate-spin" />
+                <span className="text-xs text-neutral-500">جاري التحميل...</span>
+              </>
+            )}
+          </div>
+        </div>
+      );
+    }
+
     return (
       <AccessGateScreen
         gateConfig={gateConfig}
+        showOwnerLogin={ownerEntryRequested}
         onUnlocked={() => setIsUnlockedLocally(true)}
       />
     );
@@ -237,10 +444,7 @@ export default function App() {
       {/* Navigation Header */}
       <Navbar
         currentTab={currentTab}
-        onSelectTab={(tab) => {
-          setCurrentTab(tab);
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }}
+        onSelectTab={goToTab}
         onOpenFeaturedReader={handleOpenAdventureTimeReader}
       />
 
@@ -252,12 +456,13 @@ export default function App() {
             {/* Top Hero Section */}
             <HeroSection
               featuredComic={adventureTimeComic}
-              featuredDub={gardenWallSeries}
+              featuredDub={heroDubSeries}
               onReadComic={(c) =>
                 setActiveReadingSession({ comic: c, chapter: c.chapters[0] })
               }
               onWatchDub={(d) => {
-                const ep1 = d.episodes.find((e) => !e.isComingSoon) || d.episodes[0];
+                const allEps = getAllSeriesEpisodes(d);
+                const ep1 = allEps.find((e) => isEpisodePlayable(e)) || allEps[0];
                 setActiveVideoSession({ episode: ep1, series: d });
               }}
               onSelectComicSeries={(c) => setSelectedComicForDetail(c)}
@@ -272,7 +477,7 @@ export default function App() {
                     onClick={() => setSelectedDubForDetail(gardenWallSeries)}
                     className="relative w-full lg:w-96 aspect-video rounded-2xl overflow-hidden shrink-0 shadow-2xl border border-rose-500/40 cursor-pointer group bg-neutral-950"
                   >
-                    <img
+                    <img loading="lazy" decoding="async"
                       src={gardenWallSeries.bannerImage}
                       alt={gardenWallSeries.title}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
@@ -292,7 +497,7 @@ export default function App() {
 
                     <div className="absolute bottom-2.5 right-3 text-xs font-bold text-white flex items-center gap-1.5">
                       <Clock className="w-3.5 h-3.5 text-amber-400" />
-                      <span>الحلقة الأولى: 14:54 دقيقة</span>
+                      <span>الحلقة الأولى: {gardenWallAllEpisodes[0]?.duration} دقيقة</span>
                     </div>
                   </div>
 
@@ -303,7 +508,7 @@ export default function App() {
                         {gardenWallSeries.dubStudio}
                       </span>
                       <span className="text-neutral-500">·</span>
-                      <span className="text-xs font-mono text-amber-400">تقييم 4.99 ★</span>
+                      <span className="text-xs font-mono text-amber-400">تقييم {gardenWallSeries.rating} ★</span>
                       <span className="text-neutral-500">·</span>
                       <span className="text-xs text-neutral-400">
                         {gardenWallSeries.seasons.length} موسم (الموسم الأول)
@@ -318,10 +523,10 @@ export default function App() {
                       {gardenWallSeries.synopsis}
                     </p>
 
-                    {/* Action buttons with quick access to episodes 1 through 6 */}
+                    {/* Action buttons with quick access to every playable episode (catalog or admin-linked) */}
                     <div className="space-y-3">
                       <div className="flex flex-wrap items-center gap-2">
-                        {gardenWallSeries.episodes.filter(ep => !ep.isComingSoon).map((ep) => (
+                        {gardenWallPlayable.map((ep) => (
                           <button
                             key={ep.id}
                             onClick={() => {
@@ -339,13 +544,22 @@ export default function App() {
                           className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-white font-bold text-xs rounded-xl flex items-center gap-2 transition-colors cursor-pointer border border-neutral-700"
                         >
                           <Layers className="w-3.5 h-3.5 text-amber-400" />
-                          <span>عرض كل الحلقات (8)</span>
+                          <span>عرض كل الحلقات ({gardenWallAllEpisodes.length})</span>
                         </button>
                       </div>
-                      <div className="flex items-center gap-2 text-xs text-emerald-400 font-bold">
-                        <CheckCircle2 className="w-4 h-4 shrink-0" />
-                        <span>الحلقات (1، 2، 3، 4، 5، 6) متوفرة الآن للمشاهدة الفورية بالدبلجة الرسمية كاملة وبجودة عالية!</span>
-                      </div>
+                      {gardenWallPlayable.length > 0 ? (
+                        <div className="flex items-center gap-2 text-xs text-emerald-400 font-bold">
+                          <CheckCircle2 className="w-4 h-4 shrink-0" />
+                          <span>
+                            الحلقات ({gardenWallPlayable.map((ep) => ep.episodeNumber).join('، ')}) متوفرة الآن للمشاهدة الفورية بالدبلجة الرسمية كاملة وبجودة عالية!
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 text-xs text-amber-400 font-bold">
+                          <Clock className="w-4 h-4 shrink-0" />
+                          <span>الحلقات قيد التجهيز والدبلجة وستتوفر قريباً.</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -373,7 +587,7 @@ export default function App() {
                 {/* 1. Adventure Time Box */}
                 <div className="relative rounded-3xl overflow-hidden border-2 border-amber-500/30 bg-gradient-to-br from-neutral-900 via-neutral-900 to-amber-950/20 p-6 flex flex-col sm:flex-row gap-5 shadow-xl hover:border-amber-500/60 transition-all">
                   <div className="w-36 aspect-[2/3] rounded-2xl overflow-hidden shrink-0 shadow-xl border border-amber-500/40 mx-auto sm:mx-0">
-                    <img
+                    <img loading="lazy" decoding="async"
                       src={adventureTimeComic.coverImage}
                       alt={adventureTimeComic.title}
                       className="w-full h-full object-cover"
@@ -416,7 +630,7 @@ export default function App() {
                 {/* 2. I Hate You, Please Die Box */}
                 <div className="relative rounded-3xl overflow-hidden border-2 border-rose-500/30 bg-gradient-to-br from-neutral-900 via-neutral-900 to-rose-950/20 p-6 flex flex-col sm:flex-row gap-5 shadow-xl hover:border-rose-500/60 transition-all">
                   <div className="w-36 aspect-[2/3] rounded-2xl overflow-hidden shrink-0 shadow-xl border border-rose-500/40 mx-auto sm:mx-0">
-                    <img
+                    <img loading="lazy" decoding="async"
                       src={hateYouComic.coverImage}
                       alt={hateYouComic.title}
                       className="w-full h-full object-cover"
@@ -472,7 +686,7 @@ export default function App() {
                 </div>
 
                 <button
-                  onClick={() => setCurrentTab('comics')}
+                  onClick={() => goToTab('comics')}
                   className="text-xs sm:text-sm font-bold text-neutral-400 hover:text-white flex items-center gap-1 transition-colors cursor-pointer"
                 >
                   <span>عرض مكتبة الكوميكس كاملة</span>
@@ -509,7 +723,7 @@ export default function App() {
                 </div>
 
                 <button
-                  onClick={() => setCurrentTab('dubbed')}
+                  onClick={() => goToTab('dubbed')}
                   className="text-xs sm:text-sm font-bold text-neutral-400 hover:text-white flex items-center gap-1 transition-colors cursor-pointer"
                 >
                   <span>عرض جميع الأعمال المدبلجة</span>
@@ -544,7 +758,7 @@ export default function App() {
                 </div>
 
                 <button
-                  onClick={() => setCurrentTab('anime')}
+                  onClick={() => goToTab('anime')}
                   className="text-xs sm:text-sm font-bold text-rose-400 hover:text-rose-300 flex items-center gap-1 transition-colors cursor-pointer"
                 >
                   <span>عرض جميع مسلسلات وحلقات الأنمي</span>
@@ -556,10 +770,10 @@ export default function App() {
               <div className="relative rounded-3xl overflow-hidden border-2 border-rose-500/40 bg-gradient-to-r from-neutral-900 via-neutral-900 to-rose-950/30 p-6 sm:p-8 shadow-2xl">
                 <div className="flex flex-col lg:flex-row items-center gap-6 sm:gap-8">
                   <div
-                    onClick={() => setCurrentTab('anime')}
+                    onClick={() => goToTab('anime')}
                     className="w-40 sm:w-56 aspect-[2/3] rounded-2xl overflow-hidden shrink-0 shadow-2xl border-2 border-rose-500/50 cursor-pointer group bg-neutral-950 relative"
                   >
-                    <img
+                    <img loading="lazy" decoding="async"
                       src={ANIME_WORKS[0].coverImage}
                       alt={ANIME_WORKS[0].title}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
@@ -597,21 +811,28 @@ export default function App() {
                     <div className="flex flex-wrap items-center gap-3">
                       <button
                         onClick={() => {
-                          const ep1 = ANIME_WORKS[0].episodes[0];
-                          setActiveVideoSession({ episode: ep1, series: ANIME_WORKS[0] });
+                          if (featuredAnimeEpisode) {
+                            setActiveVideoSession({ episode: featuredAnimeEpisode, series: featuredAnime });
+                          } else {
+                            setSelectedDubForDetail(featuredAnime);
+                          }
                         }}
                         className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs sm:text-sm rounded-xl shadow-lg shadow-rose-950 flex items-center gap-2 transition-all cursor-pointer hover:scale-105 active:scale-95"
                       >
                         <Play className="w-4 h-4 fill-white" />
-                        <span>مشاهدة الحلقة 01 الآن</span>
+                        <span>
+                          {featuredAnimeEpisode
+                            ? `مشاهدة الحلقة ${String(featuredAnimeEpisode.episodeNumber).padStart(2, '0')} الآن`
+                            : 'تفاصيل الحلقات (قريباً)'}
+                        </span>
                       </button>
 
                       <button
-                        onClick={() => setCurrentTab('anime')}
+                        onClick={() => goToTab('anime')}
                         className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-750 text-white font-bold text-xs sm:text-sm rounded-xl border border-neutral-700 flex items-center gap-1.5 transition-colors cursor-pointer"
                       >
                         <Layers className="w-4 h-4 text-rose-400" />
-                        <span>استعراض حلقات الأنمي (12)</span>
+                        <span>استعراض حلقات الأنمي ({featuredAnime.episodesCount})</span>
                       </button>
                     </div>
                   </div>
@@ -633,7 +854,7 @@ export default function App() {
                 </div>
 
                 <button
-                  onClick={() => setCurrentTab('movies')}
+                  onClick={() => goToTab('movies')}
                   className="text-xs sm:text-sm font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1 transition-colors cursor-pointer"
                 >
                   <span>عرض قسم الأفلام</span>
@@ -645,13 +866,10 @@ export default function App() {
               <div className="relative rounded-3xl overflow-hidden border-2 border-amber-500/40 bg-gradient-to-r from-neutral-900 via-neutral-900 to-amber-950/30 p-6 sm:p-8 shadow-2xl">
                 <div className="flex flex-col lg:flex-row items-center gap-6 sm:gap-8">
                   <div
-                    onClick={() => {
-                      const ep = MOVIES_WORKS[0].episodes[0];
-                      setActiveVideoSession({ episode: ep, series: MOVIES_WORKS[0] });
-                    }}
+                    onClick={openFeaturedMovie}
                     className="w-40 sm:w-56 aspect-[2/3] rounded-2xl overflow-hidden shrink-0 shadow-2xl border-2 border-amber-500/50 cursor-pointer group bg-neutral-950 relative"
                   >
-                    <img
+                    <img loading="lazy" decoding="async"
                       src={MOVIES_WORKS[0].coverImage}
                       alt={MOVIES_WORKS[0].title}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
@@ -672,7 +890,7 @@ export default function App() {
                         ★ {MOVIES_WORKS[0].rating}
                       </span>
                       <span className="text-xs font-mono text-neutral-400">
-                        المدة: 02:20:00
+                        المدة: {featuredMovieEpisode?.duration}
                       </span>
                     </div>
 
@@ -684,14 +902,11 @@ export default function App() {
                     </p>
 
                     <button
-                      onClick={() => {
-                        const ep = MOVIES_WORKS[0].episodes[0];
-                        setActiveVideoSession({ episode: ep, series: MOVIES_WORKS[0] });
-                      }}
+                      onClick={openFeaturedMovie}
                       className="px-6 py-2.5 bg-amber-500 hover:bg-amber-400 text-neutral-950 font-black text-xs sm:text-sm rounded-xl shadow-lg shadow-amber-950 flex items-center gap-2 transition-all cursor-pointer hover:scale-105 active:scale-95"
                     >
                       <Play className="w-4 h-4 fill-neutral-950" />
-                      <span>مشاهدة الفيلم السينمائي الآن</span>
+                      <span>{featuredMoviePlayable ? 'مشاهدة الفيلم السينمائي الآن' : 'تفاصيل الفيلم (قريباً)'}</span>
                     </button>
                   </div>
                 </div>
@@ -861,7 +1076,11 @@ export default function App() {
                       حلقات مسلسل «{gardenWallSeries.title}» - الموسم الأول
                     </h3>
                     <p className="text-xs text-neutral-400">
-                      الحلقة الأولى متوفرة للمشاهدة الآن، والحلقات الأخرى قيد التجهيز والدبلجة (قريباً).
+                      {gardenWallPlayable.length === 0
+                        ? 'الحلقات قيد التجهيز والدبلجة (قريباً).'
+                        : gardenWallPlayable.length === gardenWallAllEpisodes.length
+                          ? 'جميع الحلقات متوفرة للمشاهدة الآن.'
+                          : `${gardenWallPlayable.length} من ${gardenWallAllEpisodes.length} حلقات متوفرة للمشاهدة الآن، والحلقات الأخرى قيد التجهيز والدبلجة (قريباً).`}
                     </p>
                   </div>
                 </div>
@@ -906,45 +1125,47 @@ export default function App() {
 
           <div className="flex flex-wrap items-center gap-4 sm:gap-6">
             <button
-              onClick={() => setCurrentTab('home')}
+              onClick={() => goToTab('home')}
               className="hover:text-neutral-300 transition-colors cursor-pointer"
             >
               الرئيسية
             </button>
             <button
-              onClick={() => setCurrentTab('anime')}
+              onClick={() => goToTab('anime')}
               className="hover:text-rose-400 transition-colors cursor-pointer text-rose-300/90 font-medium"
             >
               الأنمي
             </button>
             <button
-              onClick={() => setCurrentTab('movies')}
+              onClick={() => goToTab('movies')}
               className="hover:text-amber-400 transition-colors cursor-pointer text-amber-300/90 font-medium"
             >
               الأفلام
             </button>
             <button
-              onClick={() => setCurrentTab('dubbed')}
+              onClick={() => goToTab('dubbed')}
               className="hover:text-neutral-300 transition-colors cursor-pointer"
             >
               الأعمال المدبلجة
             </button>
             <button
-              onClick={() => setCurrentTab('comics')}
+              onClick={() => goToTab('comics')}
               className="hover:text-neutral-300 transition-colors cursor-pointer"
             >
               الكوميكس
             </button>
 
-            {/* Hidden / Discreet Admin Gateway in Footer */}
-            <button
-              onClick={() => setIsAdminOpen(true)}
-              className="flex items-center gap-1 text-neutral-600 hover:text-amber-400 transition-colors cursor-pointer text-[11px]"
-              title="لوحة تحكم المشرف لإدارة روابط درايف والترجمات (Ctrl+Shift+A)"
-            >
-              <ShieldCheck className="w-3.5 h-3.5 text-rose-500" />
-              <span>لوحة المشرف</span>
-            </button>
+            {/* Admin Gateway in Footer — rendered only for the signed-in owner */}
+            {isOwnerAdmin && (
+              <button
+                onClick={() => setIsAdminOpen(true)}
+                className="flex items-center gap-1 text-neutral-600 hover:text-amber-400 transition-colors cursor-pointer text-[11px]"
+                title="لوحة تحكم المشرف لإدارة روابط درايف والترجمات (Ctrl+Shift+A)"
+              >
+                <ShieldCheck className="w-3.5 h-3.5 text-rose-500" />
+                <span>لوحة المشرف</span>
+              </button>
+            )}
           </div>
         </div>
       </footer>
@@ -989,7 +1210,7 @@ export default function App() {
             })
           }
           onClose={() => setActiveVideoSession(null)}
-          onOpenAdmin={() => setIsAdminOpen(true)}
+          onOpenAdmin={isOwnerAdmin ? () => setIsAdminOpen(true) : undefined}
         />
       )}
 
@@ -1007,7 +1228,20 @@ export default function App() {
         />
       )}
 
-      {/* Admin Media Dashboard Modal (Hidden from Regular Viewers) */}
+      <BackToTopButton />
+
+      <React.Suspense
+        fallback={
+          isAdminOpen || createWorkCategory !== null ? (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
+              <div className="w-10 h-10 rounded-full border-4 border-neutral-700 border-t-rose-500 animate-spin" />
+            </div>
+          ) : null
+        }
+      >
+      {/* Admin Media Dashboard Modal (Hidden from Regular Viewers).
+          Mounted only while open so it loads fresh data each time and runs no effects in the background. */}
+      {isAdminOpen && (
       <AdminMediaDashboard
         isOpen={isAdminOpen}
         onClose={() => {
@@ -1024,9 +1258,11 @@ export default function App() {
           setCreateWorkCategory(defaultCat);
         }}
       />
+      )}
 
-      {/* Owner-Only Add/Edit Custom Work Modal (Anime, Movies, Dubbed) */}
-      {isOwnerAdmin && (
+      {/* Owner-Only Add/Edit Custom Work Modal (Anime, Movies, Dubbed).
+          Mounted only while open so a cancelled edit can't leak into the next "add work". */}
+      {isOwnerAdmin && createWorkCategory !== null && (
         <AdminCreateWorkModal
           isOpen={createWorkCategory !== null}
           defaultCategory={createWorkCategory || 'anime'}
@@ -1037,6 +1273,7 @@ export default function App() {
           }}
         />
       )}
+      </React.Suspense>
     </div>
   );
 }

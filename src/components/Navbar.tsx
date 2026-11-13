@@ -16,11 +16,12 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   return (
     <header className="sticky top-0 z-40 w-full border-b border-neutral-800/80 bg-neutral-950/85 backdrop-blur-md">
-      <div className="max-w-7xl mx-auto flex items-center justify-between gap-4 sm:gap-8 px-4 sm:px-6 lg:px-8 h-16">
+      {/* Below xl the links get their own full-width (scrollable) row so they never collapse on phones/tablets */}
+      <div className="max-w-7xl mx-auto flex flex-wrap xl:flex-nowrap items-center justify-between gap-x-3 gap-y-1 sm:gap-x-8 px-4 sm:px-6 lg:px-8 pt-2 pb-1 xl:py-0 xl:h-16">
         {/* Brand Zone (Single element wordmark) */}
         <button
           onClick={() => onSelectTab('home')}
-          className="flex items-center gap-2.5 text-right cursor-pointer group focus:outline-none shrink-0"
+          className="order-1 flex items-center gap-2.5 text-right cursor-pointer group focus:outline-none shrink-0"
         >
           <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-rose-700 via-rose-600 to-amber-500 flex items-center justify-center text-white shadow-lg shadow-rose-950/40 group-hover:scale-105 transition-transform duration-200">
             <Flame className="w-5 h-5 text-white" />
@@ -36,7 +37,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         </button>
 
         {/* Navigation Zone (Clean single-line links) */}
-        <nav className="flex items-center gap-1 sm:gap-3 lg:gap-5 text-xs sm:text-sm font-semibold text-neutral-300 overflow-x-auto py-1">
+        <nav className="order-3 xl:order-2 w-full xl:w-auto min-w-0 flex items-center gap-1 sm:gap-3 lg:gap-5 text-xs sm:text-sm font-semibold text-neutral-300 overflow-x-auto py-1">
           <button
             onClick={() => onSelectTab('home')}
             className={`px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
@@ -95,10 +96,10 @@ export const Navbar: React.FC<NavbarProps> = ({
         </nav>
 
         {/* Primary Action Zone */}
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="order-2 xl:order-3 flex items-center gap-3 shrink-0">
           <button
             onClick={onOpenFeaturedReader}
-            className="px-4 py-2 text-xs sm:text-sm font-bold text-white bg-gradient-to-r from-rose-600 to-rose-700 hover:from-rose-500 hover:to-rose-600 rounded-lg shadow-md shadow-rose-900/30 transition-all duration-150 cursor-pointer flex items-center gap-2 whitespace-nowrap shrink-0 active:scale-95"
+            className="px-3 sm:px-4 py-2 text-xs sm:text-sm font-bold text-white bg-gradient-to-r from-rose-600 to-rose-700 hover:from-rose-500 hover:to-rose-600 rounded-lg shadow-md shadow-rose-900/30 transition-all duration-150 cursor-pointer flex items-center gap-2 whitespace-nowrap shrink-0 active:scale-95"
           >
             <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
             اقرأ الفصل الحصري

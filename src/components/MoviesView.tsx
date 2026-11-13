@@ -13,7 +13,7 @@ import {
   Plus
 } from 'lucide-react';
 import { MOVIES_WORKS, DubSeries, DubEpisode } from '../data/mockData';
-import { getCustomEpisodeSource, SOURCES_UPDATED_EVENT } from '../utils/videoSource';
+import { SOURCES_UPDATED_EVENT } from '../utils/videoSource';
 import { getCustomSeriesByCategory, CUSTOM_WORKS_UPDATED_EVENT } from '../utils/customWorks';
 
 interface MoviesViewProps {
@@ -49,8 +49,6 @@ export const MoviesView: React.FC<MoviesViewProps> = ({
   const flagshipMovie =
     allMovieWorks.find((m) => m.id === selectedMovieId) || allMovieWorks[0];
   const movieEpisode = flagshipMovie.episodes[0] || flagshipMovie.seasons[0]?.episodes[0];
-  const customConfig = getCustomEpisodeSource(movieEpisode.id);
-  const hasDriveLink = Boolean(customConfig?.driveLink);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-12" dir="rtl">
@@ -83,13 +81,15 @@ export const MoviesView: React.FC<MoviesViewProps> = ({
             </button>
           )}
 
-          <button
-            onClick={onOpenAdmin}
-            className="px-3.5 py-2.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-800 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-          >
-            <ShieldCheck className="w-4 h-4 text-amber-500" />
-            <span>إدارة روابط الأفلام (المشرف)</span>
-          </button>
+          {isOwnerAdmin && (
+            <button
+              onClick={onOpenAdmin}
+              className="px-3.5 py-2.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-800 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <ShieldCheck className="w-4 h-4 text-amber-500" />
+              <span>إدارة روابط الأفلام (المشرف)</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -124,7 +124,7 @@ export const MoviesView: React.FC<MoviesViewProps> = ({
             onClick={() => onPlayEpisode(movieEpisode, flagshipMovie)}
             className="w-52 sm:w-72 aspect-[2/3] rounded-2xl overflow-hidden shrink-0 shadow-2xl border-2 border-amber-500/50 cursor-pointer group bg-neutral-950 relative"
           >
-            <img
+            <img loading="lazy" decoding="async"
               src={flagshipMovie.coverImage}
               alt={flagshipMovie.title}
               className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
@@ -133,7 +133,7 @@ export const MoviesView: React.FC<MoviesViewProps> = ({
             <div className="absolute inset-0 bg-gradient-to-t from-neutral-950/80 via-transparent to-transparent" />
 
             <div className="absolute top-3 right-3 bg-amber-500 text-neutral-950 font-mono text-[10px] font-black px-2.5 py-0.5 rounded-full shadow">
-              الفيلم السينمائي الأول
+              {flagshipMovie.id === allMovieWorks[0].id ? 'الفيلم السينمائي الأول' : 'فيلم سينمائي كامل'}
             </div>
 
             <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40">
@@ -159,7 +159,7 @@ export const MoviesView: React.FC<MoviesViewProps> = ({
                   <span>{flagshipMovie.rating}</span>
                 </span>
                 <span className="text-xs font-mono px-2.5 py-0.5 rounded-full bg-neutral-800 text-neutral-300">
-                  مدة العرض: 02:20:00
+                  مدة العرض: {movieEpisode.duration}
                 </span>
                 <span className="text-xs text-neutral-400 font-mono">
                   {flagshipMovie.dubStudio}
@@ -238,7 +238,7 @@ export const MoviesView: React.FC<MoviesViewProps> = ({
               >
                 <div>
                   <div className="relative aspect-[16/10] rounded-2xl overflow-hidden bg-neutral-950 mb-3">
-                    <img
+                    <img loading="lazy" decoding="async"
                       src={movie.bannerImage || movie.coverImage}
                       alt={movie.title}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"

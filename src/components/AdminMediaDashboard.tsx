@@ -46,7 +46,8 @@ import {
   BackupDriveLink,
   SubtitleTrack,
   DEFAULT_SUBTITLE_TRACKS,
-  SOURCES_UPDATED_EVENT
+  SOURCES_UPDATED_EVENT,
+  isDemoSubtitleSrc
 } from '../utils/videoSource';
 import { User } from 'firebase/auth';
 import {
@@ -90,8 +91,9 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
   const [driveInputLink, setDriveInputLink] = useState<string>('');
   const [accountLabelInput, setAccountLabelInput] = useState<string>('');
   const [backupLinks, setBackupLinks] = useState<BackupDriveLink[]>([]);
-  const [arabicVttInput, setArabicVttInput] = useState<string>('/subtitles/arabic.vtt');
-  const [englishVttInput, setEnglishVttInput] = useState<string>('/subtitles/english.vtt');
+  // Empty = no subtitles. The bundled /subtitles/*.vtt files are demo placeholders and are never saved.
+  const [arabicVttInput, setArabicVttInput] = useState<string>('');
+  const [englishVttInput, setEnglishVttInput] = useState<string>('');
   const [customTracks, setCustomTracks] = useState<SubtitleTrack[]>([]);
   const [activeTab, setActiveTab] = useState<'editor' | 'overview' | 'backup' | 'security'>('editor');
   const [saveToast, setSaveToast] = useState<string | null>(null);
@@ -104,6 +106,7 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
   const [authLoading, setAuthLoading] = useState<boolean>(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [syncingCloud, setSyncingCloud] = useState<boolean>(false);
+  const [savingEpisode, setSavingEpisode] = useState<boolean>(false);
 
   // Access Gate security state
   const [gateConfig, setGateConfig] = useState<AccessGateConfig>(getDefaultAccessGateConfig());
@@ -143,6 +146,11 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
     if (isOpen) {
       void fetchAccessGateConfig()
         .then((cfg) => {
+          if (cfg.source === 'fallback') {
+            // Firestore didn't answer: don't seed the toggle with a guess that a save would then publish
+            setGateError('تعذر تحميل إعدادات القفل الحالية من السحابة — أغلق اللوحة وأعد فتحها قبل حفظ أي تغيير.');
+            return;
+          }
           setGateConfig(cfg);
           setGateEnabledInput(cfg.enabled);
           setGateError(null);
@@ -192,8 +200,12 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
       setDriveInputLink(saved.driveLink || '');
       setAccountLabelInput(saved.accountLabel || '');
       setBackupLinks(Array.isArray(saved.backupDriveLinks) ? saved.backupDriveLinks : []);
-      const arSub = saved.subtitles?.find((s) => s.lang === 'ar')?.src || '/subtitles/arabic.vtt';
-      const enSub = saved.subtitles?.find((s) => s.lang === 'en')?.src || '/subtitles/english.vtt';
+      const realSrc = (lang: string) => {
+        const src = saved.subtitles?.find((s) => s.lang === lang)?.src || '';
+        return isDemoSubtitleSrc(src) ? '' : src;
+      };
+      const arSub = realSrc('ar');
+      const enSub = realSrc('en');
       setArabicVttInput(arSub);
       setEnglishVttInput(enSub);
       const others = saved.subtitles?.filter((s) => s.lang !== 'ar' && s.lang !== 'en') || [];
@@ -202,12 +214,13 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
       setDriveInputLink(currentEpisode.driveLink || '');
       setAccountLabelInput('');
       setBackupLinks([]);
-      setArabicVttInput('/subtitles/arabic.vtt');
-      setEnglishVttInput('/subtitles/english.vtt');
+      setArabicVttInput('');
+      setEnglishVttInput('');
       setCustomTracks([]);
     }
     setTestPlayActive(false);
-  }, [selectedEpisodeId, currentEpisode]);
+    // Keyed on the episode id only: re-running on object identity used to wipe the inputs on every render
+  }, [currentEpisode?.id]);
 
   if (!isOpen) return null;
 
@@ -218,30 +231,35 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentEpisode) return;
+    if (!currentEpisode || savingEpisode) return;
+    setSavingEpisode(true);
+    try {
+      await saveCurrentEpisode(currentEpisode);
+    } finally {
+      setSavingEpisode(false);
+    }
+  };
 
+  const saveCurrentEpisode = async (currentEpisode: NonNullable<typeof allEpisodes[number]>) => {
     const trimmedLink = driveInputLink.trim();
     const normalizedDriveLink = fileId
       ? `https://drive.google.com/uc?export=download&id=${fileId}`
       : normalizeDriveDirectUrl(trimmedLink);
 
+    const arabicSrc = arabicVttInput.trim();
+    const englishSrc = englishVttInput.trim();
     const subs: SubtitleTrack[] = [
-      {
-        id: 'sub-ar',
-        lang: 'ar',
-        label: 'العربية (Arabic)',
-        src: arabicVttInput.trim() || '/subtitles/arabic.vtt',
-        default: true,
-      },
-      {
-        id: 'sub-en',
-        lang: 'en',
-        label: 'English (الإنجليزية)',
-        src: englishVttInput.trim() || '/subtitles/english.vtt',
-        default: false,
-      },
-      ...customTracks,
+      // Only save tracks the admin actually entered (never the demo placeholder files)
+      ...(arabicSrc && !isDemoSubtitleSrc(arabicSrc)
+        ? [{ id: 'sub-ar', lang: 'ar', label: 'العربية (Arabic)', src: arabicSrc, default: true }]
+        : []),
+      ...(englishSrc && !isDemoSubtitleSrc(englishSrc)
+        ? [{ id: 'sub-en', lang: 'en', label: 'English (الإنجليزية)', src: englishSrc, default: false }]
+        : []),
+      // Uploaded files live only in this tab as blob: URLs — they can't be published to visitors
+      ...customTracks.filter((t) => !t.src.startsWith('blob:')),
     ];
+    const skippedLocalTracks = customTracks.filter((t) => t.src.startsWith('blob:')).length;
 
     const result = await saveCustomEpisodeSource(currentEpisode.id, {
       driveLink: normalizedDriveLink,
@@ -255,11 +273,19 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
     if (result.savedToCloud) {
       setSaveToast(`تم الحفظ الدائم للحلقة (${currentEpisode.title}) في سحابة Firebase للأبد بنجاح!`);
     } else if (result.savedToServer) {
-      setSaveToast(`تم الحفظ على السيرفر المؤقت فقط — سجّل الدخول بحساب Google لحفظ الحلقة في سحابة Firebase للأبد!`);
+      setSaveToast(`تم الحفظ على السيرفر فقط — تعذر الحفظ في سحابة Firebase (${result.cloudError || 'خطأ غير معروف'}).`);
+    } else if (result.cloudError === 'ADMIN_AUTH_REQUIRED') {
+      setSaveToast(`تم الحفظ في هذا المتصفح فقط — سجّل الدخول بحساب المشرف لحفظ الحلقة على السيرفر وفي السحابة.`);
     } else {
-      setSaveToast(`تم الحفظ في المتصفح مؤقتاً — يرجى تسجيل الدخول بحساب Google للحفظ الدائم في السحابة.`);
+      setSaveToast(`تم الحفظ في هذا المتصفح فقط — تعذر الوصول إلى السيرفر والسحابة، وستُعاد المحاولة تلقائياً عند فتح الموقع مجدداً.`);
     }
-    setTimeout(() => setSaveToast(null), 5000);
+    if (skippedLocalTracks > 0) {
+      setSaveToast(
+        (prev) =>
+          `${prev ?? ''} ملاحظة: لم يُنشر ${skippedLocalTracks} ملف ترجمة مرفوع من الجهاز لأنه يعمل في هذه النافذة فقط — ارفع ملف VTT على رابط عام والصقه في خانة الترجمة.`
+      );
+    }
+    setTimeout(() => setSaveToast(null), skippedLocalTracks > 0 ? 9000 : 5000);
   };
 
   const handleGoogleLogin = async () => {
@@ -268,12 +294,9 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
     try {
       const user = await signInWithGoogleAdmin();
       if (isVerifiedAdminUser(user)) {
-        const { syncedCount } = await syncAllLocalSourcesToCloud();
-        setSaveToast(
-          syncedCount > 0
-            ? `تم تسجيل الدخول ورفع ${syncedCount} روابط سابقة إلى سحابة Firebase للأبد!`
-            : 'تم تسجيل الدخول! أي رابط تحفظه الآن يُخزَّن في سحابة Firebase للأبد.'
-        );
+        // The auth-state listener above already uploads any links missing from the cloud;
+        // running a second migration here raced it and surfaced permission errors.
+        setSaveToast('تم تسجيل الدخول! أي رابط تحفظه الآن يُخزَّن في سحابة Firebase للأبد.');
         setTimeout(() => setSaveToast(null), 4500);
       }
     } catch (err) {
@@ -304,20 +327,30 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
   const handleResetToDefault = async () => {
     if (!currentEpisode) return;
     if (window.confirm('هل أنت متأكد من حذف تخصيص هذا الرابط واستعادة الإعدادات الأصلية للحلقة؟')) {
-      await removeCustomEpisodeSource(currentEpisode.id);
+      const result = await removeCustomEpisodeSource(currentEpisode.id);
       setDriveInputLink(currentEpisode.driveLink || '');
       setAccountLabelInput('');
       setBackupLinks([]);
-      setArabicVttInput('/subtitles/arabic.vtt');
-      setEnglishVttInput('/subtitles/english.vtt');
+      setArabicVttInput('');
+      setEnglishVttInput('');
       setCustomTracks([]);
-      setSaveToast('تمت استعادة الإعدادات الأصلية للحلقة وحذف التخصيص من السيرفر بنجاح.');
-      setTimeout(() => setSaveToast(null), 3500);
+      if (result.removedFromServer && result.removedFromCloud) {
+        setSaveToast('تمت استعادة الإعدادات الأصلية للحلقة وحذف التخصيص من السيرفر والسحابة بنجاح.');
+      } else if (result.cloudError === 'ADMIN_AUTH_REQUIRED') {
+        setSaveToast('تم الحذف من هذا المتصفح فقط — سجّل الدخول بحساب المشرف لحذف الرابط من السيرفر والسحابة.');
+      } else {
+        setSaveToast(
+          `تم الحذف جزئياً — السيرفر: ${result.removedFromServer ? 'تم' : 'فشل'}، السحابة: ${result.removedFromCloud ? 'تم' : 'فشل'}.`
+        );
+      }
+      setTimeout(() => setSaveToast(null), 4500);
     }
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    // Reset so picking the same file again still fires onChange
+    e.target.value = '';
     if (!file) return;
 
     const reader = new FileReader();
@@ -326,7 +359,7 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
       if (!content) return;
 
       let vttText = content;
-      if (file.name.endsWith('.srt')) {
+      if (file.name.toLowerCase().endsWith('.srt')) {
         vttText = convertSrtToVtt(content);
       }
       const blobUrl = createVttBlobUrl(vttText);
@@ -338,8 +371,8 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
       };
 
       setCustomTracks((prev) => [newTrack, ...prev]);
-      setSaveToast(`تم تحميل ملف الترجمة (${file.name}) بنجاح`);
-      setTimeout(() => setSaveToast(null), 3000);
+      setSaveToast(`تم تحميل ملف الترجمة (${file.name}) للمعاينة في هذه النافذة فقط — لنشره للزوار ارفعه على رابط عام.`);
+      setTimeout(() => setSaveToast(null), 5000);
     };
     reader.readAsText(file);
   };
@@ -491,7 +524,7 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
               <div className="flex items-center gap-2 text-amber-300 font-bold">
                 <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
                 <span>
-                  أنت مسجل بحساب ({authUser.email})، لكن الحفظ في سحابة Firebase مخصص لحساب المشرف ({ADMIN_EMAIL}).
+                  أنت مسجل بحساب ({authUser.email}) وهو لا يملك صلاحية المشرف.
                 </span>
               </div>
               <button
@@ -508,7 +541,7 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
               <div className="flex items-center gap-2 text-blue-300 font-bold">
                 <Cloud className="w-4 h-4 shrink-0 text-blue-400" />
                 <span>
-                  سجّل الدخول بحساب Google ({ADMIN_EMAIL}) لتفعيل الحفظ السحابي الدائم في Firebase للأبد.
+                  سجّل الدخول بحساب المشرف (Google) للوصول إلى أدوات الإدارة.
                 </span>
               </div>
               <button
@@ -529,8 +562,10 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
           </div>
         )}
 
-        {/* Sub-nav Tabs */}
-        <div className="flex border-b border-neutral-800 bg-neutral-950/50 px-5 text-xs font-bold">
+        {isVerifiedAdminUser(authUser) ? (
+          <>
+        {/* Sub-nav Tabs (admin only) — scrolls sideways on phones instead of clipping the last tabs */}
+        <div className="flex overflow-x-auto [&>button]:shrink-0 border-b border-neutral-800 bg-neutral-950/50 px-5 text-xs font-bold">
           <button
             onClick={() => setActiveTab('editor')}
             className={`py-3 px-4 border-b-2 transition-colors cursor-pointer flex items-center gap-2 ${
@@ -848,7 +883,7 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
                       type="text"
                       value={arabicVttInput}
                       onChange={(e) => setArabicVttInput(e.target.value)}
-                      placeholder="/subtitles/arabic.vtt"
+                      placeholder="https://.../arabic.vtt (اختياري — فارغ = بدون ترجمة)"
                       className="w-full bg-neutral-950 border border-neutral-700 rounded-lg px-3 py-2 text-xs font-mono text-neutral-200 focus:outline-none focus:border-rose-500"
                       dir="ltr"
                     />
@@ -862,7 +897,7 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
                       type="text"
                       value={englishVttInput}
                       onChange={(e) => setEnglishVttInput(e.target.value)}
-                      placeholder="/subtitles/english.vtt"
+                      placeholder="https://.../english.vtt (اختياري — فارغ = بدون ترجمة)"
                       className="w-full bg-neutral-950 border border-neutral-700 rounded-lg px-3 py-2 text-xs font-mono text-neutral-200 focus:outline-none focus:border-rose-500"
                       dir="ltr"
                     />
@@ -924,10 +959,11 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
                   <div className="flex items-center gap-2">
                     <button
                       type="submit"
-                      className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-rose-950 transition-all flex items-center gap-2 cursor-pointer hover:scale-105 active:scale-95"
+                      disabled={savingEpisode}
+                      className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-rose-950 transition-all flex items-center gap-2 cursor-pointer hover:scale-105 active:scale-95 disabled:opacity-60 disabled:pointer-events-none"
                     >
                       <Save className="w-4 h-4" />
-                      <span>حفظ وتفعيل للحلقة فورياً</span>
+                      <span>{savingEpisode ? 'جاري الحفظ...' : 'حفظ وتفعيل للحلقة فورياً'}</span>
                     </button>
 
                     {allSavedConfigs[currentEpisode.id] && (
@@ -1297,6 +1333,20 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
             </div>
           )}
         </div>
+          </>
+        ) : (
+          <div className="p-8 flex flex-col items-center justify-center text-center gap-3">
+            <div className="w-12 h-12 rounded-2xl bg-neutral-800 border border-neutral-700 flex items-center justify-center">
+              <Lock className="w-6 h-6 text-neutral-400" />
+            </div>
+            <p className="text-sm font-bold text-white">هذه اللوحة مخصصة لمشرف الموقع فقط</p>
+            <p className="text-xs text-neutral-400 max-w-sm leading-relaxed">
+              {authReady
+                ? 'سجّل الدخول بحساب المشرف من الشريط أعلاه لعرض أدوات الإدارة.'
+                : 'جاري التحقق من تسجيل الدخول...'}
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -231,19 +231,24 @@ export function buildDubSeriesFromCustomWork(work: CustomWorkRecord): DubSeries 
     });
   }
 
+  // Spread episodes evenly so the configured number of seasons is honoured
+  // (e.g. 12 episodes / 5 seasons → 3,3,2,2,2 — not 4 seasons of 3). Episode IDs are unchanged.
   const seasons: DubSeason[] = [];
-  const perSeason = Math.ceil(allEpisodes.length / totalSeasons);
-  for (let s = 0; s < totalSeasons; s += 1) {
-    const chunk = allEpisodes.slice(s * perSeason, (s + 1) * perSeason);
-    if (chunk.length > 0 || s === 0) {
-      seasons.push({
-        id: `${work.workId}-season-${s + 1}`,
-        seasonNumber: s + 1,
-        title: `الموسم ${s + 1}`,
-        episodesCount: chunk.length,
-        episodes: chunk,
-      });
-    }
+  const seasonCount = Math.min(totalSeasons, allEpisodes.length);
+  const basePerSeason = Math.floor(allEpisodes.length / seasonCount);
+  const seasonsWithExtra = allEpisodes.length % seasonCount;
+  let cursor = 0;
+  for (let s = 0; s < seasonCount; s += 1) {
+    const size = basePerSeason + (s < seasonsWithExtra ? 1 : 0);
+    const chunk = allEpisodes.slice(cursor, cursor + size);
+    cursor += size;
+    seasons.push({
+      id: `${work.workId}-season-${s + 1}`,
+      seasonNumber: s + 1,
+      title: `الموسم ${s + 1}`,
+      episodesCount: chunk.length,
+      episodes: chunk,
+    });
   }
 
   return {
@@ -299,9 +304,24 @@ export function attachCustomWorksRealtimeListener(): () => void {
       window.dispatchEvent(new CustomEvent(SOURCES_UPDATED_EVENT));
     },
     (error) => {
-      handleFirestoreError(error, OperationType.LIST, CUSTOM_WORKS_COLLECTION);
+      // Don't throw from inside the listener callback (it would surface as an uncaught error)
+      console.warn('Realtime custom-works listener error:', error);
     }
   );
+}
+
+// Built series are cached per record object so callers get stable identities between renders.
+// (Rebuilding them on every call made the admin dashboard's effects loop forever.)
+// Records are replaced, never mutated, so a changed work naturally gets a fresh entry.
+const builtSeriesCache = new WeakMap<CustomWorkRecord, DubSeries>();
+
+function getBuiltSeries(work: CustomWorkRecord): DubSeries {
+  let series = builtSeriesCache.get(work);
+  if (!series) {
+    series = buildDubSeriesFromCustomWork(work);
+    builtSeriesCache.set(work, series);
+  }
+  return series;
 }
 
 export function getCustomWorkRecords(category?: CustomWorkCategory): CustomWorkRecord[] {
@@ -311,7 +331,7 @@ export function getCustomWorkRecords(category?: CustomWorkCategory): CustomWorkR
 }
 
 export function getCustomSeriesByCategory(category: CustomWorkCategory): DubSeries[] {
-  return getCustomWorkRecords(category).map(buildDubSeriesFromCustomWork);
+  return getCustomWorkRecords(category).map(getBuiltSeries);
 }
 
 export async function saveCustomWorkToCloud(
@@ -330,7 +350,10 @@ export async function saveCustomWorkToCloud(
   const sanitizedTitle = input.title.trim().slice(0, 200);
   const sanitizedSynopsis = input.synopsis.trim().slice(0, 4000);
   const sanitizedCover = input.coverImage.trim().slice(0, 400000);
-  const sanitizedBanner = (input.bannerImage?.trim() || sanitizedCover).slice(0, 400000);
+  // Store no banner when it's just the cover again: readers fall back to the cover, and a second
+  // copy of a data-URL image would double every document, download and localStorage mirror.
+  const rawBanner = (input.bannerImage?.trim() || '').slice(0, 400000);
+  const sanitizedBanner = rawBanner === sanitizedCover ? '' : rawBanner;
   const sanitizedOriginal = (input.originalTitle || '').trim().slice(0, 200);
   const sanitizedStudio = (input.dubStudio || 'إضافة المالك').trim().slice(0, 120);
   const sanitizedGenres =
@@ -341,11 +364,16 @@ export async function saveCustomWorkToCloud(
   if (sanitizedGenres.length === 0) {
     sanitizedGenres.push(input.category === 'movie' ? 'سينما' : 'مغامرات');
   }
-  const sanitizedRating = Math.min(10, Math.max(0, Number(input.rating) || 9.0));
-  const sanitizedSeasons =
-    input.category === 'movie' ? 1 : Math.min(30, Math.max(1, Math.round(input.seasonsCount || 1)));
+  // A rating of 0 is valid; only a missing/invalid value falls back to 9.0
+  const ratingNumber = Number(input.rating);
+  const sanitizedRating = Number.isFinite(ratingNumber) ? Math.min(10, Math.max(0, ratingNumber)) : 9.0;
   const sanitizedEpisodes =
     input.category === 'movie' ? 1 : Math.min(300, Math.max(1, Math.round(input.episodesCount || 12)));
+  // Never more seasons than episodes
+  const sanitizedSeasons =
+    input.category === 'movie'
+      ? 1
+      : Math.min(sanitizedEpisodes, 30, Math.max(1, Math.round(input.seasonsCount || 1)));
 
   if (!sanitizedTitle || !sanitizedCover || !sanitizedSynopsis) {
     throw new Error('يرجى إدخال الاسم وصورة الغلاف والوصف.');

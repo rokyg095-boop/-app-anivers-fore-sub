@@ -33,7 +33,7 @@ export const ComicDetailModal: React.FC<ComicDetailModalProps> = ({
       <div className="relative w-full max-w-4xl bg-neutral-900 border border-neutral-800 rounded-3xl overflow-hidden shadow-2xl my-auto">
         {/* Banner header */}
         <div className="relative h-44 sm:h-56 w-full bg-neutral-950 overflow-hidden">
-          <img
+          <img loading="lazy" decoding="async"
             src={comic.bannerImage}
             alt={comic.title}
             className="w-full h-full object-cover opacity-40 filter blur-sm scale-105"
@@ -55,7 +55,7 @@ export const ComicDetailModal: React.FC<ComicDetailModalProps> = ({
           <div className="flex flex-col sm:flex-row gap-6 items-start">
             {/* Poster Thumbnail */}
             <div className="w-36 sm:w-48 aspect-[2/3] rounded-2xl overflow-hidden border-2 border-rose-500/50 shadow-2xl bg-neutral-950 shrink-0 mx-auto sm:mx-0">
-              <img
+              <img loading="lazy" decoding="async"
                 src={comic.coverImage}
                 alt={comic.title}
                 className="w-full h-full object-cover"

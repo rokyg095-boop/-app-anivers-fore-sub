@@ -120,14 +120,16 @@ export const AnimeView: React.FC<AnimeViewProps> = ({
             </button>
           )}
 
-          <button
-            onClick={onOpenAdmin}
-            className="px-3.5 py-2.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-800 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-            title="إدارة روابط درايف للأنمي"
-          >
-            <ShieldCheck className="w-4 h-4 text-rose-500" />
-            <span>إدارة روابط الأنمي (المشرف)</span>
-          </button>
+          {isOwnerAdmin && (
+            <button
+              onClick={onOpenAdmin}
+              className="px-3.5 py-2.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-800 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+              title="إدارة روابط درايف للأنمي"
+            >
+              <ShieldCheck className="w-4 h-4 text-rose-500" />
+              <span>إدارة روابط الأنمي (المشرف)</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -169,7 +171,7 @@ export const AnimeView: React.FC<AnimeViewProps> = ({
             onClick={() => onSelectSeries(activeAnime)}
             className="w-48 sm:w-64 aspect-[2/3] rounded-2xl overflow-hidden shrink-0 shadow-2xl border-2 border-rose-500/50 cursor-pointer group bg-neutral-950 relative"
           >
-            <img
+            <img loading="lazy" decoding="async"
               src={activeAnime.coverImage}
               alt={activeAnime.title}
               className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
@@ -314,7 +316,7 @@ export const AnimeView: React.FC<AnimeViewProps> = ({
                 <div>
                   {/* Thumbnail Image */}
                   <div className="relative aspect-video rounded-xl overflow-hidden bg-neutral-950 mb-2.5">
-                    <img
+                    <img loading="lazy" decoding="async"
                       src={ep.thumbnail || activeAnime.coverImage}
                       alt={ep.title}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
@@ -404,7 +406,7 @@ export const AnimeView: React.FC<AnimeViewProps> = ({
               >
                 <div>
                   <div className="relative aspect-[16/10] rounded-2xl overflow-hidden bg-neutral-950 mb-3">
-                    <img
+                    <img loading="lazy" decoding="async"
                       src={anime.coverImage}
                       alt={anime.title}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"

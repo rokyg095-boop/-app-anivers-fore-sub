@@ -15,7 +15,7 @@ import {
   Film
 } from 'lucide-react';
 import { DubSeries, DubSeason, DubEpisode } from '../data/mockData.ts';
-import { getCustomEpisodeSource, SOURCES_UPDATED_EVENT } from '../utils/videoSource';
+import { isEpisodePlayable, SOURCES_UPDATED_EVENT } from '../utils/videoSource';
 
 interface DubSeriesDetailModalProps {
   series: DubSeries;
@@ -41,6 +41,8 @@ export const DubSeriesDetailModal: React.FC<DubSeriesDetailModalProps> = ({
   }, []);
 
   const activeSeason: DubSeason = series.seasons[selectedSeasonIndex] || series.seasons[0];
+  const firstPlayableEpisode = activeSeason.episodes.find((e) => isEpisodePlayable(e));
+  const playableCount = activeSeason.episodes.filter((e) => isEpisodePlayable(e)).length;
 
   const handleEpisodeClick = (episode: DubEpisode) => {
     // Open player directly for viewing or configuring Google Drive stream & subtitles
@@ -70,20 +72,20 @@ export const DubSeriesDetailModal: React.FC<DubSeriesDetailModalProps> = ({
           <X className="w-5 h-5" />
         </button>
 
-        {/* Modal Banner & Hero Header */}
-        <div className="relative h-64 sm:h-72 w-full overflow-hidden shrink-0 bg-neutral-950">
-          <img
+        {/* Modal Banner & Hero Header (content stays in normal flow so it can grow instead of being clipped on phones) */}
+        <div className="relative min-h-56 sm:min-h-72 w-full overflow-hidden shrink-0 bg-neutral-950 flex flex-col justify-end">
+          <img loading="lazy" decoding="async"
             src={series.bannerImage}
             alt={series.title}
-            className="w-full h-full object-cover opacity-60"
+            className="absolute inset-0 w-full h-full object-cover opacity-60"
             referrerPolicy="no-referrer"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-neutral-900 via-neutral-900/60 to-transparent" />
 
           {/* Hero Content Overlay */}
-          <div className="absolute bottom-5 right-5 left-5 flex flex-col sm:flex-row items-center sm:items-end gap-5">
-            <div className="w-28 sm:w-36 aspect-[2/3] rounded-2xl overflow-hidden shadow-2xl border-2 border-rose-500/40 shrink-0 bg-neutral-800">
-              <img
+          <div className="relative px-4 sm:px-5 pt-14 pb-4 sm:pb-5 flex flex-wrap sm:flex-nowrap items-end gap-3 sm:gap-5">
+            <div className="w-20 sm:w-36 aspect-[2/3] rounded-2xl overflow-hidden shadow-2xl border-2 border-rose-500/40 shrink-0 bg-neutral-800">
+              <img loading="lazy" decoding="async"
                 src={series.coverImage}
                 alt={series.title}
                 className="w-full h-full object-cover"
@@ -91,7 +93,7 @@ export const DubSeriesDetailModal: React.FC<DubSeriesDetailModalProps> = ({
               />
             </div>
 
-            <div className="flex-1 text-right">
+            <div className="flex-1 min-w-0 text-right">
               <div className="flex flex-wrap items-center gap-2 mb-1.5">
                 <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-rose-600/90 text-white font-bold">
                   {series.genres[0]}
@@ -105,8 +107,8 @@ export const DubSeriesDetailModal: React.FC<DubSeriesDetailModalProps> = ({
                 </span>
               </div>
 
-              <h2 className="text-2xl sm:text-3xl font-black text-white">{series.title}</h2>
-              <p className="text-xs sm:text-sm text-neutral-400 font-mono mt-0.5">
+              <h2 className="text-xl sm:text-3xl font-black text-white">{series.title}</h2>
+              <p className="text-xs sm:text-sm text-neutral-400 font-mono mt-0.5 break-words">
                 {series.originalTitle}
               </p>
 
@@ -116,14 +118,18 @@ export const DubSeriesDetailModal: React.FC<DubSeriesDetailModalProps> = ({
               </div>
             </div>
 
-            {/* Quick Play Episode 1 Button */}
-            {activeSeason.episodes[0] && !activeSeason.episodes[0].isComingSoon && (
+            {/* Quick Play: first playable episode of the selected season (catalog or admin-linked) */}
+            {firstPlayableEpisode && (
               <button
-                onClick={() => onPlayEpisode(activeSeason.episodes[0], series)}
-                className="shrink-0 px-5 py-3 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs sm:text-sm rounded-xl flex items-center gap-2 shadow-xl shadow-rose-950 transition-all cursor-pointer hover:scale-105"
+                onClick={() => onPlayEpisode(firstPlayableEpisode, series)}
+                className="w-full sm:w-auto shrink-0 px-5 py-3 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs sm:text-sm rounded-xl flex items-center justify-center gap-2 shadow-xl shadow-rose-950 transition-all cursor-pointer hover:scale-105"
               >
                 <Play className="w-4 h-4 fill-white translate-x-0.5" />
-                <span>مشاهدة الحلقة الأولى</span>
+                <span>
+                  {firstPlayableEpisode.episodeNumber === 1
+                    ? 'مشاهدة الحلقة الأولى'
+                    : `مشاهدة الحلقة ${firstPlayableEpisode.episodeNumber}`}
+                </span>
               </button>
             )}
           </div>
@@ -183,15 +189,15 @@ export const DubSeriesDetailModal: React.FC<DubSeriesDetailModalProps> = ({
                 <span>حلقات {activeSeason.title}</span>
               </h3>
               <span className="text-xs text-neutral-400 font-mono">
-                {activeSeason.episodes.filter((e) => !e.isComingSoon || Boolean(getCustomEpisodeSource(e.id)?.driveLink)).length} متاحة ·{' '}
-                {activeSeason.episodes.filter((e) => e.isComingSoon && !Boolean(getCustomEpisodeSource(e.id)?.driveLink)).length} قريباً
+                {playableCount} متاحة ·{' '}
+                {activeSeason.episodes.length - playableCount} قريباً
               </span>
             </div>
 
             {/* Grid of Episodes */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {activeSeason.episodes.map((ep) => {
-                const isComingSoon = ep.isComingSoon && !Boolean(getCustomEpisodeSource(ep.id)?.driveLink);
+                const isComingSoon = !isEpisodePlayable(ep);
 
                 return (
                   <div
@@ -205,7 +211,7 @@ export const DubSeriesDetailModal: React.FC<DubSeriesDetailModalProps> = ({
                   >
                     {/* Thumbnail Area */}
                     <div className="relative w-32 sm:w-36 aspect-video rounded-xl overflow-hidden shrink-0 bg-neutral-950">
-                      <img
+                      <img loading="lazy" decoding="async"
                         src={ep.thumbnail}
                         alt={ep.title}
                         className={`w-full h-full object-cover transition-transform duration-300 ${
@@ -221,7 +227,7 @@ export const DubSeriesDetailModal: React.FC<DubSeriesDetailModalProps> = ({
 
                       {/* Play or Lock Icon */}
                       <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-                        {isComingSoon && !getCustomEpisodeSource(ep.id)?.driveLink ? (
+                        {isComingSoon ? (
                           <div className="w-8 h-8 rounded-full bg-neutral-800/90 text-amber-400 flex items-center justify-center border border-amber-500/40">
                             <Lock className="w-4 h-4" />
                           </div>
@@ -239,7 +245,7 @@ export const DubSeriesDetailModal: React.FC<DubSeriesDetailModalProps> = ({
                         <div className="flex items-center gap-1.5 mb-1">
                           <span
                             className={`text-[11px] font-mono font-bold px-1.5 py-0.2 rounded ${
-                              isComingSoon && !getCustomEpisodeSource(ep.id)?.driveLink
+                              isComingSoon
                                 ? 'bg-amber-950/80 text-amber-400 border border-amber-500/30'
                                 : 'bg-rose-950/80 text-rose-300 border border-rose-500/30'
                             }`}
@@ -247,7 +253,7 @@ export const DubSeriesDetailModal: React.FC<DubSeriesDetailModalProps> = ({
                             الحلقة {ep.episodeNumber}
                           </span>
 
-                          {isComingSoon && !getCustomEpisodeSource(ep.id)?.driveLink ? (
+                          {isComingSoon ? (
                             <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/40">
                               قريباً
                             </span>

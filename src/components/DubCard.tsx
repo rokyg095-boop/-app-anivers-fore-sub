@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Play, Mic, Clock, Lock, ChevronLeft, CheckCircle2 } from 'lucide-react';
 import { DubEpisode, DubSeries } from '../data/mockData.ts';
-import { getCustomEpisodeSource, SOURCES_UPDATED_EVENT } from '../utils/videoSource';
+import { isEpisodePlayable, SOURCES_UPDATED_EVENT } from '../utils/videoSource';
 
 interface DubCardProps {
   episode: DubEpisode;
@@ -19,9 +19,7 @@ export const DubCard: React.FC<DubCardProps> = ({ episode, series, onPlay, onSel
     return () => window.removeEventListener(SOURCES_UPDATED_EVENT, onUpdate);
   }, []);
 
-  const customSource = getCustomEpisodeSource(episode.id);
-  const hasSavedDriveLink = Boolean(customSource?.driveLink || customSource?.videoUrl);
-  const isComingSoon = episode.isComingSoon && !hasSavedDriveLink;
+  const isComingSoon = !isEpisodePlayable(episode);
 
   const handleClick = () => {
     if (isComingSoon) {

@@ -10,6 +10,7 @@ function openDB(): Promise<IDBDatabase> {
       return;
     }
 
+    let settled = false;
     const request = window.indexedDB.open(DB_NAME, DB_VERSION);
 
     request.onupgradeneeded = (event) => {
@@ -20,11 +21,28 @@ function openDB(): Promise<IDBDatabase> {
     };
 
     request.onsuccess = () => {
-      resolve(request.result);
+      const db = request.result;
+      if (settled) {
+        // We already gave up (blocked); don't leak the late connection
+        db.close();
+        return;
+      }
+      settled = true;
+      // Let a future schema upgrade (in this or another tab) proceed instead of being blocked
+      db.onversionchange = () => db.close();
+      resolve(db);
     };
 
     request.onerror = () => {
+      if (settled) return;
+      settled = true;
       reject(request.error);
+    };
+
+    request.onblocked = () => {
+      if (settled) return;
+      settled = true;
+      reject(new Error('IndexedDB open is blocked by another open tab'));
     };
   });
 }
@@ -33,10 +51,12 @@ export async function getStoredChapterPages(
   comicId: string,
   chapterId: string
 ): Promise<string[] | null> {
+  let db: IDBDatabase | null = null;
   try {
-    const db = await openDB();
-    return new Promise((resolve) => {
-      const transaction = db.transaction(STORE_NAME, 'readonly');
+    db = await openDB();
+    const database = db;
+    return await new Promise<string[] | null>((resolve) => {
+      const transaction = database.transaction(STORE_NAME, 'readonly');
       const store = transaction.objectStore(STORE_NAME);
       const key = `${comicId}_${chapterId}`;
       const request = store.get(key);
@@ -53,9 +73,34 @@ export async function getStoredChapterPages(
       request.onerror = () => {
         resolve(null);
       };
+
+      transaction.onabort = () => {
+        resolve(null);
+      };
     });
   } catch {
     return null;
+  } finally {
+    db?.close();
+  }
+}
+
+// Resolves only once the transaction has committed (quota errors surface as a transaction abort,
+// after the individual request may already have reported success).
+async function runWriteTransaction(op: (store: IDBObjectStore) => void): Promise<void> {
+  const db = await openDB();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(STORE_NAME, 'readwrite');
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = (event) =>
+        reject((event.target as IDBRequest | null)?.error || transaction.error);
+      transaction.onabort = () =>
+        reject(transaction.error || new Error('IndexedDB transaction was aborted'));
+      op(transaction.objectStore(STORE_NAME));
+    });
+  } finally {
+    db.close();
   }
 }
 
@@ -64,20 +109,9 @@ export async function saveChapterPages(
   chapterId: string,
   pages: string[]
 ): Promise<void> {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(STORE_NAME, 'readwrite');
-    const store = transaction.objectStore(STORE_NAME);
-    const key = `${comicId}_${chapterId}`;
-    const request = store.put(pages, key);
-
-    request.onsuccess = () => {
-      resolve();
-    };
-
-    request.onerror = () => {
-      reject(request.error);
-    };
+  const key = `${comicId}_${chapterId}`;
+  await runWriteTransaction((store) => {
+    store.put(pages, key);
   });
 }
 
@@ -85,19 +119,8 @@ export async function deleteChapterPages(
   comicId: string,
   chapterId: string
 ): Promise<void> {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(STORE_NAME, 'readwrite');
-    const store = transaction.objectStore(STORE_NAME);
-    const key = `${comicId}_${chapterId}`;
-    const request = store.delete(key);
-
-    request.onsuccess = () => {
-      resolve();
-    };
-
-    request.onerror = () => {
-      reject(request.error);
-    };
+  const key = `${comicId}_${chapterId}`;
+  await runWriteTransaction((store) => {
+    store.delete(key);
   });
 }

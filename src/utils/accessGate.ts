@@ -12,6 +12,7 @@ import {
   OperationType,
   handleFirestoreError,
 } from '../firebase.ts';
+import { sha256Hex } from './sha256.ts';
 
 export const ACCESS_GATE_STORAGE_KEY = 'aniverse_access_unlock_v1';
 export const ACCESS_GATE_UPDATED_EVENT = 'aniverse-access-gate-updated';
@@ -24,16 +25,31 @@ export interface AccessGateConfig {
   enabled: boolean;
   passcodeHash: string;
   gateVersion: number;
-  source: 'cloud' | 'default';
+  /**
+   * 'cloud'    – read from Firestore
+   * 'default'  – Firestore answered and no settings document exists yet (built-in defaults are the real config)
+   * 'fallback' – Firestore did not answer in time; defaults are a guess and the real config may differ
+   */
+  source: 'cloud' | 'default' | 'fallback';
 }
 
 export async function hashPasscode(code: string): Promise<string> {
   const normalized = code.trim();
   const encoder = new TextEncoder();
   const data = encoder.encode(normalized);
-  const digest = await crypto.subtle.digest('SHA-256', data);
-  const bytes = Array.from(new Uint8Array(digest));
-  return bytes.map((b) => b.toString(16).padStart(2, '0')).join('');
+  // crypto.subtle only exists on secure origins (https / localhost). Over plain http on the LAN
+  // or in some WebViews it is undefined, so fall back to the bundled implementation.
+  const subtle = typeof crypto !== 'undefined' ? crypto.subtle : undefined;
+  if (subtle) {
+    try {
+      const digest = await subtle.digest('SHA-256', data);
+      const bytes = Array.from(new Uint8Array(digest));
+      return bytes.map((b) => b.toString(16).padStart(2, '0')).join('');
+    } catch {
+      // fall through to the JS implementation
+    }
+  }
+  return sha256Hex(data);
 }
 
 export function getDefaultAccessGateConfig(): AccessGateConfig {
@@ -57,7 +73,11 @@ export async function fetchAccessGateConfig(): Promise<AccessGateConfig> {
       }),
     ]);
     if (timerId) clearTimeout(timerId);
-    if (!snap || !snap.exists()) {
+    if (!snap) {
+      // Timed out — callers should treat this as "unknown" and retry rather than trust it
+      return { ...getDefaultAccessGateConfig(), source: 'fallback' };
+    }
+    if (!snap.exists()) {
       return getDefaultAccessGateConfig();
     }
     const data = snap.data() as Record<string, unknown>;
@@ -172,8 +192,9 @@ export async function saveAccessGateSettings(params: {
   let nextVersion = currentVersion;
 
   if (trimmedNewCode.length > 0) {
-    if (trimmedNewCode.length < 3 || trimmedNewCode.length > 64) {
-      throw new Error('يجب أن يتكون رمز الدخول من 3 إلى 64 حرفاً أو رقماً.');
+    // The hash is publicly readable, so short codes can be brute-forced offline in seconds.
+    if (trimmedNewCode.length < 6 || trimmedNewCode.length > 64) {
+      throw new Error('يجب أن يتكون رمز الدخول من 6 إلى 64 حرفاً — يُفضّل مزج أحرف وأرقام ليصعب تخمينه.');
     }
     nextHash = await hashPasscode(trimmedNewCode);
     nextVersion = existingExists ? Math.min(currentVersion + 1, 1000000) : 1;
