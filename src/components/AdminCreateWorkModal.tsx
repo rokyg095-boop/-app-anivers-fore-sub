@@ -434,8 +434,10 @@ export const AdminCreateWorkModal: React.FC<AdminCreateWorkModalProps> = ({
                   />
                 </div>
 
-                {category !== 'movie' && (
-                  <div className="grid grid-cols-3 gap-3">
+                {/* Fields may be cleared while typing (NaN = empty); values are clamped on save */}
+                <div className={`grid gap-3 ${category !== 'movie' ? 'grid-cols-3' : 'grid-cols-1'}`}>
+                  {category !== 'movie' && (
+                    <>
                     <div>
                       <label className="text-xs font-bold text-neutral-300 block mb-1">
                         عدد المواسم:
@@ -444,8 +446,8 @@ export const AdminCreateWorkModal: React.FC<AdminCreateWorkModalProps> = ({
                         type="number"
                         min={1}
                         max={30}
-                        value={seasonsCount}
-                        onChange={(e) => setSeasonsCount(Math.max(1, Number(e.target.value) || 1))}
+                        value={Number.isFinite(seasonsCount) ? seasonsCount : ''}
+                        onChange={(e) => setSeasonsCount(e.target.value === '' ? NaN : Number(e.target.value))}
                         className="w-full bg-neutral-950 border border-neutral-700 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-rose-500"
                       />
                     </div>
@@ -457,11 +459,13 @@ export const AdminCreateWorkModal: React.FC<AdminCreateWorkModalProps> = ({
                         type="number"
                         min={1}
                         max={300}
-                        value={episodesCount}
-                        onChange={(e) => setEpisodesCount(Math.max(1, Number(e.target.value) || 1))}
+                        value={Number.isFinite(episodesCount) ? episodesCount : ''}
+                        onChange={(e) => setEpisodesCount(e.target.value === '' ? NaN : Number(e.target.value))}
                         className="w-full bg-neutral-950 border border-neutral-700 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-rose-500"
                       />
                     </div>
+                    </>
+                  )}
                     <div>
                       <label className="text-xs font-bold text-neutral-300 block mb-1">
                         التقييم:
@@ -471,13 +475,12 @@ export const AdminCreateWorkModal: React.FC<AdminCreateWorkModalProps> = ({
                         step="0.1"
                         min={0}
                         max={10}
-                        value={rating}
-                        onChange={(e) => setRating(Math.min(10, Math.max(0, Number(e.target.value) || 0)))}
+                        value={Number.isFinite(rating) ? rating : ''}
+                        onChange={(e) => setRating(e.target.value === '' ? NaN : Number(e.target.value))}
                         className="w-full bg-neutral-950 border border-neutral-700 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-rose-500"
                       />
                     </div>
-                  </div>
-                )}
+                </div>
 
                 <div>
                   <label className="text-xs font-bold text-neutral-300 block mb-1">

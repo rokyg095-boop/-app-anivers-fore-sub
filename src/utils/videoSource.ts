@@ -34,6 +34,55 @@ const EPISODE_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
 const EPISODE_SOURCES_COLLECTION = 'episodeSources';
 
 /**
+ * Only http(s) URLs and same-site paths are allowed as media/subtitle links. Anything else
+ * (e.g. "javascript:" or "data:text/html") becomes '' so it can never reach a <video>/<iframe> src.
+ */
+export function safeMediaUrl(value: unknown, maxLength = 1000): string {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim().slice(0, maxLength);
+  if (!trimmed) return '';
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  if (trimmed.startsWith('/') && !trimmed.startsWith('//')) return trimmed;
+  // In-tab subtitle previews created by the admin dashboard
+  if (trimmed.startsWith('blob:')) return trimmed;
+  return '';
+}
+
+function sanitizeLoadedConfig(cfg: unknown): CustomEpisodeConfig | null {
+  if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) return null;
+  const c = cfg as CustomEpisodeConfig;
+  return {
+    ...c,
+    videoUrl: safeMediaUrl(c.videoUrl),
+    driveLink: safeMediaUrl(c.driveLink),
+    backupDriveLinks: Array.isArray(c.backupDriveLinks)
+      ? c.backupDriveLinks
+          .filter((b) => b && typeof b === 'object')
+          .map((b) => ({ ...b, url: safeMediaUrl(b.url) }))
+          .filter((b) => b.url)
+      : [],
+    subtitles: Array.isArray(c.subtitles)
+      ? c.subtitles
+          .filter((s) => s && typeof s === 'object')
+          .map((s) => ({ ...s, src: safeMediaUrl(s.src, 500) }))
+          .filter((s) => s.src)
+      : [],
+  };
+}
+
+/** Applies sanitizeLoadedConfig to every entry of a sources map coming from the server, cloud or cache. */
+function sanitizeLoadedSources(map: unknown): Record<string, CustomEpisodeConfig> {
+  const out: Record<string, CustomEpisodeConfig> = {};
+  if (!map || typeof map !== 'object' || Array.isArray(map)) return out;
+  for (const [id, cfg] of Object.entries(map as Record<string, unknown>)) {
+    if (id === '__proto__' || id === 'constructor' || id === 'prototype') continue;
+    const clean = sanitizeLoadedConfig(cfg);
+    if (clean) out[id] = clean;
+  }
+  return out;
+}
+
+/**
  * Extracts a Google Drive File ID from various link formats:
  * - https://drive.google.com/file/d/FILE_ID/view?usp=sharing
  * - https://drive.google.com/file/d/FILE_ID/preview
@@ -203,8 +252,7 @@ function readLocalStorageSources(): Record<string, CustomEpisodeConfig> {
   if (typeof window === 'undefined') return {};
   try {
     const raw = localStorage.getItem(CUSTOM_SOURCES_STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : {};
-    return parsed && typeof parsed === 'object' ? parsed : {};
+    return sanitizeLoadedSources(raw ? JSON.parse(raw) : {});
   } catch {
     return {};
   }
@@ -219,14 +267,58 @@ function writeLocalStorageSources(data: Record<string, CustomEpisodeConfig>): vo
   }
 }
 
+// Episode IDs edited in this browser that have not reached the server or Firestore yet.
+// They are kept on top of fresh remote data and retried on the next sync, instead of being lost.
+const PENDING_SOURCES_STORAGE_KEY = 'aniverse_pending_episode_sources_v1';
+
+function readPendingEpisodeIds(): string[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PENDING_SOURCES_STORAGE_KEY) || '[]');
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function setEpisodePending(episodeId: string, pending: boolean): void {
+  if (typeof window === 'undefined') return;
+  const ids = new Set(readPendingEpisodeIds());
+  if (pending) ids.add(episodeId);
+  else ids.delete(episodeId);
+  try {
+    if (ids.size > 0) localStorage.setItem(PENDING_SOURCES_STORAGE_KEY, JSON.stringify([...ids]));
+    else localStorage.removeItem(PENDING_SOURCES_STORAGE_KEY);
+  } catch {
+    // Storage unavailable (private mode / quota) — nothing else to do
+  }
+}
+
+/**
+ * Authorization header for the server's write endpoints (they require the verified admin's Firebase ID token).
+ * Returns null when no admin is signed in, so callers can skip requests that would be rejected anyway.
+ */
+async function getAdminAuthHeaders(): Promise<Record<string, string> | null> {
+  const user = auth.currentUser;
+  if (!user || !isVerifiedAdminUser(user)) return null;
+  try {
+    return { Authorization: `Bearer ${await user.getIdToken()}` };
+  } catch {
+    return null;
+  }
+}
+
 let inMemorySources: Record<string, CustomEpisodeConfig> = {
-  ...(bundledSavedSources as Record<string, CustomEpisodeConfig>),
+  ...sanitizeLoadedSources(bundledSavedSources),
   ...readLocalStorageSources(),
 };
 
+// IDs present in the last Firestore snapshot, so deletions made by the admin also disappear for visitors
+let lastCloudEpisodeIds = new Set<string>();
+
 function sanitizeEpisodeConfigForBlueprint(config: CustomEpisodeConfig): CustomEpisodeConfig {
-  const driveLink = (config.driveLink ? normalizeDriveDirectUrl(config.driveLink) : '').slice(0, 1000);
-  const videoUrl = (config.videoUrl ? normalizeDriveDirectUrl(config.videoUrl) : driveLink).slice(0, 1000);
+  const driveLink = safeMediaUrl(config.driveLink ? normalizeDriveDirectUrl(config.driveLink) : '');
+  const videoUrl = safeMediaUrl(config.videoUrl ? normalizeDriveDirectUrl(config.videoUrl) : driveLink);
   const accountLabel = (config.accountLabel || '').trim().slice(0, 120);
 
   const backupDriveLinks = Array.isArray(config.backupDriveLinks)
@@ -235,9 +327,10 @@ function sanitizeEpisodeConfigForBlueprint(config: CustomEpisodeConfig): CustomE
         .slice(0, 10)
         .map((b, i) => ({
           id: String(b.id || `backup-${Date.now()}-${i}`).slice(0, 80),
-          url: normalizeDriveDirectUrl(b.url).slice(0, 1000),
+          url: safeMediaUrl(normalizeDriveDirectUrl(b.url)),
           accountLabel: String(b.accountLabel || '').trim().slice(0, 120),
         }))
+        .filter((b) => b.url)
     : [];
 
   const subtitles = Array.isArray(config.subtitles)
@@ -245,9 +338,10 @@ function sanitizeEpisodeConfigForBlueprint(config: CustomEpisodeConfig): CustomE
         id: String(s.id || `sub-${i}`).slice(0, 60),
         lang: String(s.lang || 'ar').slice(0, 24),
         label: String(s.label || 'Subtitle').slice(0, 80),
-        src: String(s.src || '').slice(0, 500),
+        src: safeMediaUrl(s.src, 500),
         default: Boolean(s.default),
       }))
+      .filter((s) => s.src)
     : [];
 
   return {
@@ -269,16 +363,18 @@ function docDataToCustomConfig(data: Record<string, unknown>): CustomEpisodeConf
     isoUpdatedAt = rawUpdatedAt;
   }
 
-  return {
-    driveLink: typeof data.driveLink === 'string' ? data.driveLink : '',
-    videoUrl: typeof data.videoUrl === 'string' ? data.videoUrl : '',
-    accountLabel: typeof data.accountLabel === 'string' ? data.accountLabel : '',
-    backupDriveLinks: Array.isArray(data.backupDriveLinks)
-      ? (data.backupDriveLinks as BackupDriveLink[])
-      : [],
-    subtitles: Array.isArray(data.subtitles) ? (data.subtitles as SubtitleTrack[]) : [],
-    updatedAt: isoUpdatedAt,
-  };
+  return (
+    sanitizeLoadedConfig({
+      driveLink: typeof data.driveLink === 'string' ? data.driveLink : '',
+      videoUrl: typeof data.videoUrl === 'string' ? data.videoUrl : '',
+      accountLabel: typeof data.accountLabel === 'string' ? data.accountLabel : '',
+      backupDriveLinks: Array.isArray(data.backupDriveLinks)
+        ? (data.backupDriveLinks as BackupDriveLink[])
+        : [],
+      subtitles: Array.isArray(data.subtitles) ? (data.subtitles as SubtitleTrack[]) : [],
+      updatedAt: isoUpdatedAt,
+    }) || {}
+  );
 }
 
 /**
@@ -311,18 +407,59 @@ export function attachRealtimeCloudListener(): () => void {
         cloudSources[docSnap.id] = docDataToCustomConfig(docSnap.data());
       });
 
-      inMemorySources = {
-        ...(bundledSavedSources as Record<string, CustomEpisodeConfig>),
-        ...inMemorySources,
-        ...cloudSources,
-      };
+      // Drop entries that were deleted from Firestore since the previous snapshot
+      const pendingIds = new Set(readPendingEpisodeIds());
+      const next = { ...inMemorySources };
+      for (const id of lastCloudEpisodeIds) {
+        if (!(id in cloudSources) && !pendingIds.has(id)) delete next[id];
+      }
+      lastCloudEpisodeIds = new Set(Object.keys(cloudSources));
+
+      inMemorySources = { ...next, ...cloudSources };
       writeLocalStorageSources(inMemorySources);
       window.dispatchEvent(new CustomEvent(SOURCES_UPDATED_EVENT, { detail: { cloudSynced: true } }));
     },
     (error) => {
-      handleFirestoreError(error, OperationType.LIST, EPISODE_SOURCES_COLLECTION);
+      // Don't throw from inside the listener callback (it would surface as an uncaught error)
+      console.warn('Realtime episode-sources listener error:', error);
     }
   );
+}
+
+/**
+ * Sends one episode source to the server (disk) and to Firestore. Never throws.
+ */
+async function persistEpisodeSourceRemotely(
+  episodeId: string,
+  sanitized: CustomEpisodeConfig
+): Promise<SaveEpisodeResult> {
+  const authHeaders = await getAdminAuthHeaders();
+  if (!authHeaders) {
+    return { savedToServer: false, savedToCloud: false, cloudError: 'ADMIN_AUTH_REQUIRED' };
+  }
+
+  let savedToServer = false;
+  try {
+    const res = await fetch(`/api/episode-sources/${encodeURIComponent(episodeId)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
+      body: JSON.stringify(sanitized),
+    });
+    savedToServer = res.ok;
+  } catch (e) {
+    console.error('Failed to persist episode source to server:', e);
+  }
+
+  let savedToCloud = false;
+  let cloudError: string | undefined;
+  try {
+    await upsertEpisodeSourceInCloud(episodeId, sanitized);
+    savedToCloud = true;
+  } catch (err) {
+    cloudError = err instanceof Error ? err.message : String(err);
+  }
+
+  return { savedToServer, savedToCloud, cloudError };
 }
 
 /**
@@ -332,12 +469,14 @@ export async function syncEpisodeSourcesFromServer(): Promise<Record<string, Cus
   if (typeof window === 'undefined') return inMemorySources;
 
   let serverSources: Record<string, CustomEpisodeConfig> = {};
+  let serverOk = false;
   try {
     const res = await fetch('/api/episode-sources', { cache: 'no-store' });
     if (res.ok) {
       const payload = await res.json();
       if (payload?.sources && typeof payload.sources === 'object') {
-        serverSources = payload.sources;
+        serverSources = sanitizeLoadedSources(payload.sources);
+        serverOk = true;
       }
     }
   } catch {
@@ -345,46 +484,40 @@ export async function syncEpisodeSourcesFromServer(): Promise<Record<string, Cus
   }
 
   let cloudSources: Record<string, CustomEpisodeConfig> = {};
+  let cloudOk = false;
   try {
     cloudSources = await fetchEpisodeSourcesFromCloud();
+    cloudOk = true;
+    lastCloudEpisodeIds = new Set(Object.keys(cloudSources));
   } catch (err) {
     console.warn('Cloud sync warning:', err);
   }
 
+  const bundled = sanitizeLoadedSources(bundledSavedSources);
   const localSources = readLocalStorageSources();
-  const localOnlyEntries: Record<string, CustomEpisodeConfig> = {};
 
-  for (const [epId, cfg] of Object.entries(localSources)) {
-    if (
-      !serverSources[epId] &&
-      (cfg?.driveLink || cfg?.videoUrl || (cfg?.backupDriveLinks && cfg.backupDriveLinks.length > 0))
-    ) {
-      localOnlyEntries[epId] = cfg;
+  // The live server file supersedes the build-time bundled snapshot, and Firestore has the final say.
+  // localStorage is only an offline cache: using it on top of fresh data would keep links the admin
+  // has since deleted or replaced alive forever in returning visitors' browsers.
+  let merged: Record<string, CustomEpisodeConfig> =
+    serverOk || cloudOk
+      ? { ...(serverOk ? serverSources : bundled), ...cloudSources }
+      : { ...bundled, ...localSources };
+
+  // Edits made in this browser that never reached the server/cloud stay on top and are retried (admin only)
+  const pendingIds = readPendingEpisodeIds();
+  for (const epId of pendingIds) {
+    const cfg = localSources[epId];
+    if (!cfg) {
+      setEpisodePending(epId, false);
+      continue;
     }
-  }
-
-  let merged: Record<string, CustomEpisodeConfig> = {
-    ...(bundledSavedSources as Record<string, CustomEpisodeConfig>),
-    ...localSources,
-    ...serverSources,
-    ...cloudSources,
-  };
-
-  if (Object.keys(localOnlyEntries).length > 0) {
-    try {
-      const pushRes = await fetch('/api/episode-sources/bulk/import', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'merge', sources: localOnlyEntries }),
-      });
-      if (pushRes.ok) {
-        const pushData = await pushRes.json();
-        if (pushData?.sources) {
-          merged = { ...pushData.sources, ...cloudSources };
-        }
+    merged[epId] = cfg;
+    if (auth.currentUser && isVerifiedAdminUser(auth.currentUser)) {
+      const result = await persistEpisodeSourceRemotely(epId, cfg);
+      if (result.savedToServer || result.savedToCloud) {
+        setEpisodePending(epId, false);
       }
-    } catch {
-      // Ignore transient upload error
     }
   }
 
@@ -395,19 +528,40 @@ export async function syncEpisodeSourcesFromServer(): Promise<Record<string, Cus
 }
 
 export function getAllCustomEpisodeSources(): Record<string, CustomEpisodeConfig> {
-  if (typeof window === 'undefined') return inMemorySources;
-  const local = readLocalStorageSources();
-  inMemorySources = {
-    ...(bundledSavedSources as Record<string, CustomEpisodeConfig>),
-    ...inMemorySources,
-    ...local,
-  };
+  // inMemorySources is seeded from the bundle + localStorage at startup and kept in step with
+  // localStorage by every writer below. Re-merging the bundle here used to resurrect deleted links.
   return inMemorySources;
 }
 
 export function getCustomEpisodeSource(episodeId: string): CustomEpisodeConfig | null {
   const all = getAllCustomEpisodeSources();
   return all[episodeId] || null;
+}
+
+/** True when the admin has saved any usable link (primary, direct video or a backup server) for this episode. */
+export function hasCustomPlayableSource(episodeId: string): boolean {
+  const cfg = inMemorySources[episodeId];
+  if (!cfg) return false;
+  return Boolean(
+    cfg.driveLink?.trim() ||
+      cfg.videoUrl?.trim() ||
+      (Array.isArray(cfg.backupDriveLinks) && cfg.backupDriveLinks.some((b) => b?.url?.trim()))
+  );
+}
+
+/**
+ * Single rule for "can this episode be played": not marked coming-soon in the catalog,
+ * or the admin has linked a source for it. Use this everywhere instead of checking isComingSoon alone.
+ */
+export function isEpisodePlayable(ep: { id: string; isComingSoon?: boolean } | null | undefined): boolean {
+  if (!ep) return false;
+  return !ep.isComingSoon || hasCustomPlayableSource(ep.id);
+}
+
+/** The bundled /subtitles/arabic.vtt and english.vtt are demo placeholders, not real subtitles for any episode. */
+export function isDemoSubtitleSrc(src: string | undefined): boolean {
+  const s = (src || '').trim();
+  return s === '/subtitles/arabic.vtt' || s === '/subtitles/english.vtt';
 }
 
 async function upsertEpisodeSourceInCloud(
@@ -483,8 +637,13 @@ export async function syncAllLocalSourcesToCloud(): Promise<{ syncedCount: numbe
   let syncedCount = 0;
   for (const [epId, cfg] of Object.entries(allLocal)) {
     if (!cloudExisting[epId] && EPISODE_ID_PATTERN.test(epId)) {
-      await upsertEpisodeSourceInCloud(epId, cfg);
-      syncedCount += 1;
+      // One failing entry must not abort the rest of the migration
+      try {
+        await upsertEpisodeSourceInCloud(epId, cfg);
+        syncedCount += 1;
+      } catch (err) {
+        console.error(`Failed to upload episode source ${epId} to Firestore:`, err);
+      }
     }
   }
   return { syncedCount };
@@ -512,69 +671,60 @@ export async function saveCustomEpisodeSource(
   writeLocalStorageSources(inMemorySources);
   window.dispatchEvent(new CustomEvent(SOURCES_UPDATED_EVENT, { detail: { episodeId } }));
 
-  let savedToServer = false;
-  try {
-    const res = await fetch(`/api/episode-sources/${encodeURIComponent(episodeId)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(sanitized),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data?.sources) {
-        inMemorySources = { ...data.sources, [episodeId]: sanitized };
-        writeLocalStorageSources(inMemorySources);
-      }
-      savedToServer = true;
-    }
-  } catch (e) {
-    console.error('Failed to persist episode source to server:', e);
-  }
-
-  let savedToCloud = false;
-  let cloudError: string | undefined;
-  if (auth.currentUser && isVerifiedAdminUser(auth.currentUser)) {
-    try {
-      await upsertEpisodeSourceInCloud(episodeId, sanitized);
-      savedToCloud = true;
-    } catch (err) {
-      cloudError = err instanceof Error ? err.message : String(err);
-    }
-  } else {
-    cloudError = 'ADMIN_AUTH_REQUIRED';
-  }
-
-  return { savedToServer, savedToCloud, cloudError };
+  const result = await persistEpisodeSourceRemotely(episodeId, sanitized);
+  setEpisodePending(episodeId, !result.savedToServer && !result.savedToCloud);
+  return result;
 }
 
-export async function removeCustomEpisodeSource(episodeId: string): Promise<boolean> {
-  if (typeof window === 'undefined') return false;
+export interface RemoveEpisodeResult {
+  removedFromServer: boolean;
+  removedFromCloud: boolean;
+  cloudError?: string;
+}
+
+/**
+ * Removes an episode's custom source locally, on the server and in Firestore. Never throws.
+ */
+export async function removeCustomEpisodeSource(episodeId: string): Promise<RemoveEpisodeResult> {
+  if (typeof window === 'undefined') {
+    return { removedFromServer: false, removedFromCloud: false };
+  }
   const all = { ...getAllCustomEpisodeSources() };
   delete all[episodeId];
   inMemorySources = all;
   writeLocalStorageSources(inMemorySources);
+  setEpisodePending(episodeId, false);
   window.dispatchEvent(new CustomEvent(SOURCES_UPDATED_EVENT, { detail: { episodeId } }));
 
-  let serverOk = false;
+  const authHeaders = await getAdminAuthHeaders();
+  if (!authHeaders) {
+    return { removedFromServer: false, removedFromCloud: false, cloudError: 'ADMIN_AUTH_REQUIRED' };
+  }
+
+  let removedFromServer = false;
   try {
     const res = await fetch(`/api/episode-sources/${encodeURIComponent(episodeId)}`, {
       method: 'DELETE',
+      headers: authHeaders,
     });
-    serverOk = res.ok;
+    removedFromServer = res.ok;
   } catch (e) {
     console.error('Failed to delete episode source on server:', e);
   }
 
-  if (auth.currentUser && isVerifiedAdminUser(auth.currentUser) && EPISODE_ID_PATTERN.test(episodeId)) {
-    const docPath = `${EPISODE_SOURCES_COLLECTION}/${episodeId}`;
+  let removedFromCloud = false;
+  let cloudError: string | undefined;
+  if (EPISODE_ID_PATTERN.test(episodeId)) {
     try {
       await deleteDoc(doc(db, EPISODE_SOURCES_COLLECTION, episodeId));
+      removedFromCloud = true;
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, docPath);
+      cloudError = error instanceof Error ? error.message : String(error);
+      console.error('Failed to delete episode source in Firestore:', error);
     }
   }
 
-  return serverOk;
+  return { removedFromServer, removedFromCloud, cloudError };
 }
 
 export function exportCustomSourcesBackup(): string {
@@ -602,8 +752,9 @@ export async function importCustomSourcesBackup(
   mode: 'merge' | 'replace' = 'merge'
 ): Promise<boolean> {
   try {
-    const parsed = JSON.parse(jsonString);
-    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+    const rawParsed = JSON.parse(jsonString);
+    if (typeof rawParsed === 'object' && rawParsed !== null && !Array.isArray(rawParsed)) {
+      const parsed = sanitizeLoadedSources(rawParsed);
       const next =
         mode === 'replace'
           ? parsed
@@ -616,27 +767,26 @@ export async function importCustomSourcesBackup(
       writeLocalStorageSources(next);
       window.dispatchEvent(new CustomEvent(SOURCES_UPDATED_EVENT, { detail: { imported: true } }));
 
-      try {
-        const res = await fetch('/api/episode-sources/bulk/import', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mode, sources: parsed }),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data?.sources) {
-            inMemorySources = data.sources;
-            writeLocalStorageSources(inMemorySources);
-          }
+      const authHeaders = await getAdminAuthHeaders();
+      if (authHeaders) {
+        try {
+          await fetch('/api/episode-sources/bulk/import', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders },
+            body: JSON.stringify({ mode, sources: parsed }),
+          });
+        } catch {
+          // Keep local copy even if offline
         }
-      } catch {
-        // Keep local copy even if offline
-      }
 
-      if (auth.currentUser && isVerifiedAdminUser(auth.currentUser)) {
+        // One bad entry must not abort the rest of the upload
         for (const [epId, cfg] of Object.entries(parsed as Record<string, CustomEpisodeConfig>)) {
           if (EPISODE_ID_PATTERN.test(epId) && cfg && typeof cfg === 'object') {
-            await upsertEpisodeSourceInCloud(epId, cfg);
+            try {
+              await upsertEpisodeSourceInCloud(epId, cfg);
+            } catch (err) {
+              console.error(`Failed to upload imported source ${epId} to Firestore:`, err);
+            }
           }
         }
       }

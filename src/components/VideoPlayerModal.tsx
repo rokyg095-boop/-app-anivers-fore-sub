@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   Play,
   Pause,
@@ -34,9 +34,31 @@ import {
   getAvailableDriveServers,
   CustomEpisodeConfig,
   SubtitleTrack,
-  DEFAULT_SUBTITLE_TRACKS,
-  SOURCES_UPDATED_EVENT
+  SOURCES_UPDATED_EVENT,
+  isEpisodePlayable,
+  isDemoSubtitleSrc
 } from '../utils/videoSource';
+
+// Resolve the saved (admin) source + the real subtitle tracks for an episode.
+// The bundled demo VTT files are never offered as subtitles.
+function resolveEpisodeSource(ep: DubEpisode): { config: CustomEpisodeConfig; subtitles: SubtitleTrack[] } {
+  const saved = getCustomEpisodeSource(ep.id);
+  const realTracks = (list?: SubtitleTrack[]) =>
+    (Array.isArray(list) ? list : []).filter((t) => t && t.src && !isDemoSubtitleSrc(t.src));
+  const savedTracks = realTracks(saved?.subtitles);
+  return {
+    config: saved || {},
+    subtitles: savedTracks.length > 0 ? savedTracks : realTracks(ep.subtitles),
+  };
+}
+
+const driveIdOf = (url: string): string | null =>
+  url && isGoogleDriveSource(url) ? extractDriveFileId(url) : null;
+
+const serverSignature = (config: CustomEpisodeConfig, ep: DubEpisode): string =>
+  getAvailableDriveServers(config, ep.driveLink)
+    .map((s) => s.url)
+    .join('|');
 
 interface VideoPlayerModalProps {
   episode: DubEpisode;
@@ -55,9 +77,16 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
   onClose,
   onOpenAdmin,
 }) => {
+  const rootRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const controlsTimeoutRef = useRef<any>(null);
+  const isPlayingRef = useRef<boolean>(true);
+  const lastTouchRevealRef = useRef<number>(0);
+  // Server index the automatic failover started from (the user's pick, or 0)
+  const failoverStartRef = useRef<number>(0);
+  // Signature of the server list currently rendered (used to detect real link changes)
+  const renderedServerSigRef = useRef<string>('');
 
   // Playback state
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
@@ -72,8 +101,10 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
   const [playFeedback, setPlayFeedback] = useState<'play' | 'pause' | null>(null);
 
   // Subtitles state
-  const [availableSubtitles, setAvailableSubtitles] = useState<SubtitleTrack[]>([]);
-  const [selectedSubtitleLang, setSelectedSubtitleLang] = useState<string>('ar'); // 'off' or lang code
+  const [availableSubtitles, setAvailableSubtitles] = useState<SubtitleTrack[]>(
+    () => resolveEpisodeSource(episode).subtitles
+  );
+  const [selectedSubtitleLang, setSelectedSubtitleLang] = useState<string>('off'); // 'off' or lang code
   const [currentSubtitleText, setCurrentSubtitleText] = useState<string>('');
   const [showSubtitleMenu, setShowSubtitleMenu] = useState<boolean>(false);
   const [showSpeedMenu, setShowSpeedMenu] = useState<boolean>(false);
@@ -83,41 +114,57 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
   const [nativeFailed, setNativeFailed] = useState<boolean>(false);
 
   // Active custom link in background + selected multi-account server index
-  const [activeSourceConfig, setActiveSourceConfig] = useState<CustomEpisodeConfig>({});
+  const [activeSourceConfig, setActiveSourceConfig] = useState<CustomEpisodeConfig>(
+    () => resolveEpisodeSource(episode).config
+  );
   const [activeServerIdx, setActiveServerIdx] = useState<number>(0);
+  const [sourcesVersion, setSourcesVersion] = useState<number>(0);
 
-  // Sync custom background source for current episode
-  const syncSource = useCallback(() => {
-    const saved = getCustomEpisodeSource(episode.id);
-    if (saved) {
-      setActiveSourceConfig(saved);
-      const subs = saved.subtitles || episode.subtitles || DEFAULT_SUBTITLE_TRACKS;
-      setAvailableSubtitles(subs);
-    } else {
-      setActiveSourceConfig({});
-      const subs = episode.subtitles || DEFAULT_SUBTITLE_TRACKS;
-      setAvailableSubtitles(subs);
-    }
+  // Episode switched: load its source synchronously during render so the first frame
+  // never uses the previous episode's links / server index / engine.
+  const [sourceEpisodeId, setSourceEpisodeId] = useState<string>(episode.id);
+  if (sourceEpisodeId !== episode.id) {
+    const resolved = resolveEpisodeSource(episode);
+    setSourceEpisodeId(episode.id);
+    setActiveSourceConfig(resolved.config);
+    setAvailableSubtitles(resolved.subtitles);
     setActiveServerIdx(0);
     setNativeFailed(false);
     setPlayerEngine('native');
-  }, [episode.id, episode.subtitles]);
+    setCurrentSubtitleText('');
+  }
 
   useEffect(() => {
-    syncSource();
+    failoverStartRef.current = 0;
+  }, [episode.id]);
 
-    // Listen for real-time admin updates
-    const handleStorageUpdate = (e: any) => {
-      if (!e.detail || e.detail.episodeId === episode.id || e.detail.imported || e.detail.synced) {
-        syncSource();
+  // Listen for admin / cloud link updates. Only reset the server + engine when this
+  // episode's server list actually changed, so unrelated sync events don't restart playback.
+  useEffect(() => {
+    const handleStorageUpdate = () => {
+      const resolved = resolveEpisodeSource(episode);
+      const sameJson = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+      setActiveSourceConfig((prev) => (sameJson(prev, resolved.config) ? prev : resolved.config));
+      setAvailableSubtitles((prev) => (sameJson(prev, resolved.subtitles) ? prev : resolved.subtitles));
+      setSourcesVersion((v) => v + 1);
+      if (serverSignature(resolved.config, episode) !== renderedServerSigRef.current) {
+        failoverStartRef.current = 0;
+        setActiveServerIdx(0);
+        setNativeFailed(false);
+        setPlayerEngine('native');
       }
     };
     window.addEventListener(SOURCES_UPDATED_EVENT, handleStorageUpdate);
     return () => window.removeEventListener(SOURCES_UPDATED_EVENT, handleStorageUpdate);
-  }, [syncSource, episode.id]);
+  }, [episode]);
 
   const availableServers = getAvailableDriveServers(activeSourceConfig, episode.driveLink);
   const currentServer = availableServers[activeServerIdx] || availableServers[0];
+  const currentServerSig = availableServers.map((s) => s.url).join('|');
+
+  useEffect(() => {
+    renderedServerSigRef.current = currentServerSig;
+  }, [currentServerSig]);
 
   // Determine effective stream source silently
   const configuredDrive = currentServer?.url || activeSourceConfig.driveLink || episode.driveLink || '';
@@ -143,18 +190,26 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
   const prevEpisode = currentIndex > 0 ? allEpisodes[currentIndex - 1] : null;
   const nextEpisode = currentIndex < allEpisodes.length - 1 ? allEpisodes[currentIndex + 1] : null;
 
-  // Subtitle cue synchronizer
+  // Keep the user's subtitle choice across episodes, but only apply it when this episode has that track
+  const effectiveSubtitleLang =
+    selectedSubtitleLang !== 'off' && availableSubtitles.some((t) => t.lang === selectedSubtitleLang)
+      ? selectedSubtitleLang
+      : 'off';
+  const preferredSubtitleLang =
+    availableSubtitles.find((t) => t.lang === 'ar')?.lang || availableSubtitles[0]?.lang || null;
+
+  // Subtitle tracks: the chosen track is 'hidden' (cues still fire, the browser draws nothing)
+  // and only our overlay renders the text. Re-bound whenever the <video> element is recreated.
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
+    const textTracks = video.textTracks;
 
     const handleCueChange = () => {
-      const tracks = video.textTracks;
       let activeText = '';
-
-      for (let i = 0; i < tracks.length; i++) {
-        const track = tracks[i];
-        if (track.mode === 'showing' && track.activeCues && track.activeCues.length > 0) {
+      for (let i = 0; i < textTracks.length; i++) {
+        const track = textTracks[i];
+        if (track.mode !== 'disabled' && track.activeCues && track.activeCues.length > 0) {
           for (let j = 0; j < track.activeCues.length; j++) {
             const cue = track.activeCues[j] as VTTCue;
             if (cue && cue.text) {
@@ -166,46 +221,37 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
       setCurrentSubtitleText(activeText);
     };
 
-    const textTracks = video.textTracks;
+    let picked = false;
     for (let i = 0; i < textTracks.length; i++) {
-      textTracks[i].oncuechange = handleCueChange;
+      const track = textTracks[i];
+      const use = !picked && effectiveSubtitleLang !== 'off' && track.language === effectiveSubtitleLang;
+      if (use) picked = true;
+      track.mode = use ? 'hidden' : 'disabled';
+      track.oncuechange = handleCueChange;
     }
+    handleCueChange();
 
     return () => {
       for (let i = 0; i < textTracks.length; i++) {
         textTracks[i].oncuechange = null;
       }
     };
-  }, [availableSubtitles, selectedSubtitleLang]);
+  }, [availableSubtitles, effectiveSubtitleLang, streamUrl, playerEngine, hasPlayableSource, nativeFailed, episode.id]);
 
-  // Handle subtitle selection in video tracks
-  const applySubtitleSelection = useCallback((lang: string) => {
+  // Handle subtitle selection (applied to the tracks by the effect above, no <video> remount)
+  const applySubtitleSelection = (lang: string) => {
     setSelectedSubtitleLang(lang);
     setShowSubtitleMenu(false);
     setCurrentSubtitleText('');
-
-    const video = videoRef.current;
-    if (!video) return;
-
-    const tracks = video.textTracks;
-    for (let i = 0; i < tracks.length; i++) {
-      const track = tracks[i];
-      if (lang === 'off') {
-        track.mode = 'disabled';
-      } else if (track.language === lang) {
-        track.mode = 'showing';
-      } else {
-        track.mode = 'disabled';
-      }
-    }
-  }, []);
+  };
 
   // Initialize playback on episode or source switch
   useEffect(() => {
     setCurrentTime(0);
+    setDuration(0);
     setCurrentSubtitleText('');
 
-    if (hasPlayableSource && videoRef.current && playerEngine === 'native') {
+    if (hasPlayableSource && videoRef.current && playerEngine === 'native' && !nativeFailed) {
       videoRef.current.currentTime = 0;
       const playPromise = videoRef.current.play();
       if (playPromise !== undefined) {
@@ -216,13 +262,70 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
     } else {
       setIsPlaying(false);
     }
-  }, [episode.id, streamUrl, hasPlayableSource, playerEngine]);
+  }, [episode.id, streamUrl, hasPlayableSource, playerEngine, nativeFailed]);
+
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
+
+  // Fullscreen state follows the browser (Esc exits fullscreen without reaching our key handler)
+  useEffect(() => {
+    const handleFullscreenChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+    };
+  }, []);
 
   const handleLoadedMetadata = () => {
-    if (videoRef.current) {
-      setDuration(videoRef.current.duration || 0);
-      applySubtitleSelection(selectedSubtitleLang);
+    const video = videoRef.current;
+    if (video) {
+      setDuration(video.duration || 0);
+      // A recreated <video> starts with browser defaults; re-apply the user's settings
+      video.volume = volume;
+      video.muted = isMuted;
+      video.playbackRate = playbackSpeed;
     }
+  };
+
+  // Direct stream failed: try the next server's direct stream, then the Drive embed player,
+  // and finally show an error panel.
+  const handleNativeError = () => {
+    const n = availableServers.length;
+    const start = failoverStartRef.current < n ? failoverStartRef.current : 0;
+    for (let step = 1; step < n; step++) {
+      const candidate = (activeServerIdx + step) % n;
+      if (candidate === start) break;
+      if (availableServers[candidate].url !== currentServer?.url) {
+        setActiveServerIdx(candidate);
+        return;
+      }
+    }
+    const order = [start, ...availableServers.map((_, i) => i).filter((i) => i !== start)];
+    const embedIdx = order.find((i) => Boolean(driveIdOf(availableServers[i]?.url || '')));
+    if (embedIdx !== undefined) {
+      setActiveServerIdx(embedIdx);
+      setPlayerEngine('embed');
+    } else {
+      setNativeFailed(true);
+    }
+  };
+
+  const selectServer = (idx: number) => {
+    failoverStartRef.current = idx;
+    setActiveServerIdx(idx);
+    setNativeFailed(false);
+    setPlayerEngine('native');
+  };
+
+  const retryPlayback = () => {
+    setActiveServerIdx(failoverStartRef.current < availableServers.length ? failoverStartRef.current : 0);
+    setNativeFailed(false);
+    setPlayerEngine('native');
   };
 
   const togglePlay = () => {
@@ -290,14 +393,20 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
     }
   };
 
+  // State is updated by the 'fullscreenchange' listener, not optimistically
   const toggleFullscreen = () => {
-    if (!document.fullscreenElement) {
-      containerRef.current?.requestFullscreen().catch(() => {});
-      setIsFullscreen(true);
-    } else {
-      document.exitFullscreen().catch(() => {});
-      setIsFullscreen(false);
+    if (document.fullscreenElement) {
+      document.exitFullscreen?.()?.catch(() => {});
+      return;
     }
+    const container = containerRef.current;
+    if (container && typeof container.requestFullscreen === 'function') {
+      container.requestFullscreen().catch(() => {});
+      return;
+    }
+    // iPhone Safari has no element fullscreen; fall back to the native video fullscreen
+    const video = videoRef.current as (HTMLVideoElement & { webkitEnterFullscreen?: () => void }) | null;
+    video?.webkitEnterFullscreen?.();
   };
 
   const formatTime = (secs: number) => {
@@ -310,9 +419,25 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
   // Keyboard controls (Space, Arrow keys, F, M, C, Esc)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        target?.isContentEditable
+      ) {
+        return;
+      }
+      // Ignore keys while focus is inside another dialog layered over the player
+      const active = document.activeElement;
+      if (active && active !== document.body && rootRef.current && !rootRef.current.contains(active)) {
+        return;
+      }
+      const onButton = target instanceof HTMLButtonElement || target instanceof HTMLAnchorElement;
 
+      // e.code keeps shortcuts working on Arabic keyboard layouts
       if (e.code === 'Space') {
+        if (onButton) return; // let the focused button handle its own activation
         e.preventDefault();
         togglePlay();
       } else if (e.code === 'ArrowRight') {
@@ -321,19 +446,22 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
       } else if (e.code === 'ArrowLeft') {
         e.preventDefault();
         skipSeconds(-10);
-      } else if (e.key === 'f' || e.key === 'F') {
+      } else if (e.code === 'KeyF') {
         e.preventDefault();
         toggleFullscreen();
-      } else if (e.key === 'm' || e.key === 'M') {
+      } else if (e.code === 'KeyM') {
         e.preventDefault();
         toggleMute();
-      } else if (e.key === 'c' || e.key === 'C') {
+      } else if (e.code === 'KeyC') {
         e.preventDefault();
-        applySubtitleSelection(selectedSubtitleLang === 'off' ? 'ar' : 'off');
+        if (effectiveSubtitleLang !== 'off') {
+          applySubtitleSelection('off');
+        } else if (preferredSubtitleLang) {
+          applySubtitleSelection(preferredSubtitleLang);
+        }
       } else if (e.key === 'Escape') {
-        if (isFullscreen) {
-          document.exitFullscreen().catch(() => {});
-          setIsFullscreen(false);
+        if (document.fullscreenElement) {
+          document.exitFullscreen?.()?.catch(() => {});
         } else {
           onClose();
         }
@@ -341,14 +469,14 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [togglePlay, isFullscreen, selectedSubtitleLang, onClose]);
+  });
 
   // Touch and mouse movement auto-hide controls
   const handleActivity = () => {
     setShowControls(true);
     if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
     controlsTimeoutRef.current = setTimeout(() => {
-      if (isPlaying) {
+      if (isPlayingRef.current) {
         setShowControls(false);
         setShowSubtitleMenu(false);
         setShowSpeedMenu(false);
@@ -356,8 +484,83 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
     }, 3500);
   };
 
+  // On touch, a tap while the controls are hidden only reveals them (it must not also pause)
+  const handleTouchStart = () => {
+    if (!showControls && isPlaying) {
+      lastTouchRevealRef.current = Date.now();
+    }
+    handleActivity();
+  };
+
+  const handleVideoClick = () => {
+    if (Date.now() - lastTouchRevealRef.current < 700) {
+      lastTouchRevealRef.current = 0;
+      return;
+    }
+    togglePlay();
+  };
+
+  // The episode grid is large (up to 220+ cards); don't rebuild it on every timeupdate
+  const episodeGrid = useMemo(
+    () =>
+      allEpisodes.map((ep) => {
+        const isActive = ep.id === episode.id;
+        const isComingSoon = !isEpisodePlayable(ep);
+
+        return (
+          <div
+            key={ep.id}
+            onClick={() => {
+              if (!isComingSoon) {
+                onSelectEpisode(ep);
+              }
+            }}
+            className={`group relative rounded-xl overflow-hidden border p-1.5 transition-all cursor-pointer flex flex-col ${
+              isActive
+                ? 'bg-rose-950/30 border-rose-500 shadow-md shadow-rose-950/40 ring-1 ring-rose-500'
+                : isComingSoon
+                ? 'bg-neutral-900/40 border-neutral-800/60 opacity-60'
+                : 'bg-neutral-900/80 hover:bg-neutral-850 border-neutral-800 hover:border-neutral-700'
+            }`}
+          >
+            <div className="relative aspect-video rounded-lg overflow-hidden bg-black mb-1.5">
+              <img loading="lazy" decoding="async"
+                src={ep.thumbnail}
+                alt={ep.title}
+                className={`w-full h-full object-cover transition-transform duration-300 ${
+                  isActive ? 'scale-105' : 'group-hover:scale-105'
+                }`}
+                referrerPolicy="no-referrer"
+              />
+              <div className="absolute bottom-1 left-1 px-1 text-[9px] font-mono bg-black/80 text-white rounded">
+                {ep.duration}
+              </div>
+
+              {isActive && (
+                <div className="absolute inset-0 bg-rose-600/30 flex items-center justify-center">
+                  <Play className="w-5 h-5 fill-white text-white animate-pulse" />
+                </div>
+              )}
+            </div>
+
+            <div className="min-w-0">
+              <div className="text-[10px] font-mono font-bold text-rose-400 mb-0.5">
+                الحلقة {ep.episodeNumber}
+              </div>
+              <div className="text-[11px] font-bold text-neutral-200 truncate group-hover:text-white">
+                {ep.title}
+              </div>
+            </div>
+          </div>
+        );
+      }),
+    // sourcesVersion: re-evaluate playability when admin links change
+    [allEpisodes, episode.id, onSelectEpisode, sourcesVersion]
+  );
+
   return (
     <div
+      ref={rootRef}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-xl p-0 sm:p-4 overflow-y-auto"
       dir="rtl"
     >
@@ -425,16 +628,12 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
 
         {/* Multi-Account Server Switcher Bar (Shown whenever an episode has 2+ Drive links) */}
         {availableServers.length > 1 && (
-          <div className="px-4 sm:px-6 py-2 bg-neutral-900/80 border-b border-neutral-800 flex items-center gap-2 overflow-x-auto text-xs">
+          <div className="px-4 sm:px-6 py-2 bg-neutral-900/80 border-b border-neutral-800 flex items-center gap-2 overflow-x-auto text-xs shrink-0">
             <span className="text-neutral-400 font-bold shrink-0">سيرفرات التشغيل (حسابات Drive):</span>
             {availableServers.map((srv, idx) => (
               <button
                 key={srv.id}
-                onClick={() => {
-                  setActiveServerIdx(idx);
-                  setNativeFailed(false);
-                  setPlayerEngine('native');
-                }}
+                onClick={() => selectServer(idx)}
                 className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer shrink-0 ${
                   activeServerIdx === idx
                     ? 'bg-rose-600 text-white shadow'
@@ -451,8 +650,8 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
         <div
           ref={containerRef}
           onMouseMove={handleActivity}
-          onTouchStart={handleActivity}
-          className="relative aspect-video w-full bg-black flex items-center justify-center overflow-hidden select-none group"
+          onTouchStart={handleTouchStart}
+          className="relative aspect-video w-full max-h-[calc(94vh-8rem)] shrink-0 bg-black flex items-center justify-center overflow-hidden select-none group"
         >
           {playerEngine === 'embed' && driveEmbedUrl ? (
             /* Seamless Cloud Stream Engine (Auto-switched if direct video stream is restricted) */
@@ -468,7 +667,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
           ) : !hasPlayableSource ? (
             /* Coming Soon cinematic banner */
             <div className="relative w-full h-full bg-neutral-950 flex flex-col items-center justify-center text-center p-6">
-              <img
+              <img loading="lazy" decoding="async"
                 src={episode.thumbnail}
                 alt={episode.title}
                 className="absolute inset-0 w-full h-full object-cover opacity-20 blur-sm"
@@ -484,34 +683,51 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
                 </p>
               </div>
             </div>
+          ) : nativeFailed ? (
+            /* Every server failed to play */
+            <div className="relative w-full h-full bg-neutral-950 flex flex-col items-center justify-center text-center p-6">
+              <img loading="lazy" decoding="async"
+                src={episode.thumbnail}
+                alt={episode.title}
+                className="absolute inset-0 w-full h-full object-cover opacity-20 blur-sm"
+                referrerPolicy="no-referrer"
+              />
+              <div className="relative z-10 flex flex-col items-center max-w-md">
+                <div className="w-14 h-14 rounded-3xl bg-rose-500/20 text-rose-400 flex items-center justify-center mb-3 border border-rose-500/30">
+                  <Info className="w-7 h-7" />
+                </div>
+                <h3 className="text-base sm:text-lg font-black text-white mb-2">تعذر تشغيل الحلقة</h3>
+                <p className="text-xs sm:text-sm text-neutral-400 leading-relaxed mb-4">
+                  لم نتمكن من تشغيل هذه الحلقة من أي سيرفر متاح حالياً. حاول مرة أخرى بعد قليل أو اختر سيرفراً آخر.
+                </p>
+                <button
+                  onClick={retryPlayback}
+                  className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition-colors cursor-pointer"
+                >
+                  إعادة المحاولة
+                </button>
+              </div>
+            </div>
           ) : (
             <>
               {/* Native Cinema <video> Player */}
               <video
-                key={`${streamUrl}-${selectedSubtitleLang}`}
+                key={streamUrl}
                 ref={videoRef}
                 src={streamUrl}
                 poster={episode.thumbnail}
                 onTimeUpdate={handleTimeUpdate}
                 onLoadedMetadata={handleLoadedMetadata}
+                onPlay={() => setIsPlaying(true)}
+                onPause={() => setIsPlaying(false)}
                 onEnded={() => {
                   setIsPlaying(false);
-                  if (nextEpisode && !nextEpisode.isComingSoon) {
+                  if (nextEpisode && isEpisodePlayable(nextEpisode)) {
                     onSelectEpisode(nextEpisode);
                   }
                 }}
-                onError={() => {
-                  // Try Drive embed fallback for current server first, then failover to next Drive account mirror
-                  if (driveEmbedUrl && playerEngine !== 'embed') {
-                    setPlayerEngine('embed');
-                  } else if (activeServerIdx + 1 < availableServers.length) {
-                    setActiveServerIdx((prev) => prev + 1);
-                    setPlayerEngine('native');
-                  } else {
-                    setNativeFailed(true);
-                  }
-                }}
-                onClick={togglePlay}
+                onError={handleNativeError}
+                onClick={handleVideoClick}
                 className="w-full h-full object-contain cursor-pointer"
                 playsInline
                 preload="metadata"
@@ -527,13 +743,12 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
                     src={track.src}
                     srcLang={track.lang}
                     label={track.label}
-                    default={selectedSubtitleLang === track.lang}
                   />
                 ))}
               </video>
 
               {/* Subtitle Cinema Overlay Box */}
-              {selectedSubtitleLang !== 'off' && currentSubtitleText && (
+              {effectiveSubtitleLang !== 'off' && currentSubtitleText && (
                 <div className="absolute bottom-20 sm:bottom-24 left-6 right-6 flex justify-center pointer-events-none z-20">
                   <div
                     className="max-w-3xl px-5 py-2 rounded-2xl bg-black/85 text-white text-center text-sm sm:text-lg font-bold border border-white/10 shadow-[0_4px_24px_rgba(0,0,0,0.8)] backdrop-blur-md whitespace-pre-line leading-relaxed tracking-wide text-shadow"
@@ -655,7 +870,8 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
 
                   {/* Right Controls: Subtitles, Speed, Prev/Next, Fullscreen */}
                   <div className="flex items-center gap-2 sm:gap-3 relative">
-                    {/* Subtitle Selector */}
+                    {/* Subtitle Selector (only when the episode has real subtitle tracks) */}
+                    {availableSubtitles.length > 0 && (
                     <div className="relative">
                       <button
                         onClick={() => {
@@ -663,7 +879,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
                           setShowSpeedMenu(false);
                         }}
                         className={`p-1.5 sm:px-2.5 rounded-xl border transition-all cursor-pointer flex items-center gap-1.5 ${
-                          selectedSubtitleLang !== 'off'
+                          effectiveSubtitleLang !== 'off'
                             ? 'bg-rose-600 text-white border-rose-500 shadow-md shadow-rose-950'
                             : 'bg-black/50 hover:bg-neutral-800 text-neutral-300 border-white/10'
                         }`}
@@ -671,7 +887,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
                       >
                         <Subtitles className="w-4 h-4" />
                         <span className="text-[11px] font-bold uppercase hidden md:inline">
-                          {selectedSubtitleLang === 'off' ? 'ترجمة' : selectedSubtitleLang}
+                          {effectiveSubtitleLang === 'off' ? 'ترجمة' : effectiveSubtitleLang}
                         </span>
                       </button>
 
@@ -683,13 +899,13 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
                           <button
                             onClick={() => applySubtitleSelection('off')}
                             className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs transition-colors cursor-pointer ${
-                              selectedSubtitleLang === 'off'
+                              effectiveSubtitleLang === 'off'
                                 ? 'bg-rose-600 text-white font-bold'
                                 : 'text-neutral-300 hover:bg-neutral-800'
                             }`}
                           >
                             <span>إيقاف الترجمة</span>
-                            {selectedSubtitleLang === 'off' && <Check className="w-3.5 h-3.5" />}
+                            {effectiveSubtitleLang === 'off' && <Check className="w-3.5 h-3.5" />}
                           </button>
 
                           {availableSubtitles.map((track) => (
@@ -697,18 +913,19 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
                               key={track.id}
                               onClick={() => applySubtitleSelection(track.lang)}
                               className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs transition-colors cursor-pointer ${
-                                selectedSubtitleLang === track.lang
+                                effectiveSubtitleLang === track.lang
                                   ? 'bg-rose-600 text-white font-bold'
                                   : 'text-neutral-300 hover:bg-neutral-800'
                               }`}
                             >
                               <span>{track.label}</span>
-                              {selectedSubtitleLang === track.lang && <Check className="w-3.5 h-3.5" />}
+                              {effectiveSubtitleLang === track.lang && <Check className="w-3.5 h-3.5" />}
                             </button>
                           ))}
                         </div>
                       )}
                     </div>
+                    )}
 
                     {/* Speed Selector */}
                     <div className="relative">
@@ -762,7 +979,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
         </div>
 
         {/* Pure Viewer Details & Episode Selection Panel */}
-        <div className="p-4 sm:p-6 bg-neutral-950 border-t border-neutral-900 overflow-y-auto space-y-6">
+        <div className="flex-1 min-h-0 p-4 sm:p-6 bg-neutral-950 border-t border-neutral-900 overflow-y-auto space-y-6">
           {/* Episode Title & Description */}
           <div className="flex flex-col lg:flex-row items-start justify-between gap-4">
             <div className="space-y-2 flex-1">
@@ -810,7 +1027,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
                 </button>
               )}
 
-              {nextEpisode && (!nextEpisode.isComingSoon || Boolean(getCustomEpisodeSource(nextEpisode.id)?.driveLink)) && (
+              {nextEpisode && isEpisodePlayable(nextEpisode) && (
                 <button
                   onClick={() => onSelectEpisode(nextEpisode)}
                   className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-rose-950 transition-all cursor-pointer hover:scale-105"
@@ -830,57 +1047,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
             </h4>
 
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-              {allEpisodes.map((ep) => {
-                const isActive = ep.id === episode.id;
-                const isComingSoon = ep.isComingSoon && !Boolean(getCustomEpisodeSource(ep.id)?.driveLink);
-
-                return (
-                  <div
-                    key={ep.id}
-                    onClick={() => {
-                      if (!isComingSoon) {
-                        onSelectEpisode(ep);
-                      }
-                    }}
-                    className={`group relative rounded-xl overflow-hidden border p-1.5 transition-all cursor-pointer flex flex-col ${
-                      isActive
-                        ? 'bg-rose-950/30 border-rose-500 shadow-md shadow-rose-950/40 ring-1 ring-rose-500'
-                        : isComingSoon
-                        ? 'bg-neutral-900/40 border-neutral-800/60 opacity-60'
-                        : 'bg-neutral-900/80 hover:bg-neutral-850 border-neutral-800 hover:border-neutral-700'
-                    }`}
-                  >
-                    <div className="relative aspect-video rounded-lg overflow-hidden bg-black mb-1.5">
-                      <img
-                        src={ep.thumbnail}
-                        alt={ep.title}
-                        className={`w-full h-full object-cover transition-transform duration-300 ${
-                          isActive ? 'scale-105' : 'group-hover:scale-105'
-                        }`}
-                        referrerPolicy="no-referrer"
-                      />
-                      <div className="absolute bottom-1 left-1 px-1 text-[9px] font-mono bg-black/80 text-white rounded">
-                        {ep.duration}
-                      </div>
-
-                      {isActive && (
-                        <div className="absolute inset-0 bg-rose-600/30 flex items-center justify-center">
-                          <Play className="w-5 h-5 fill-white text-white animate-pulse" />
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="min-w-0">
-                      <div className="text-[10px] font-mono font-bold text-rose-400 mb-0.5">
-                        الحلقة {ep.episodeNumber}
-                      </div>
-                      <div className="text-[11px] font-bold text-neutral-200 truncate group-hover:text-white">
-                        {ep.title}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+              {episodeGrid}
             </div>
           </div>
         </div>

@@ -49,6 +49,11 @@ export const ComicReader: React.FC<ComicReaderProps> = ({
   const [brokenPages, setBrokenPages] = useState<Record<number, boolean>>({});
   const [isImporting, setIsImporting] = useState<boolean>(false);
   const [importSuccessMessage, setImportSuccessMessage] = useState<string | null>(null);
+  const [importErrorMessage, setImportErrorMessage] = useState<string | null>(null);
+  const canFullscreen =
+    typeof document !== 'undefined' &&
+    Boolean(document.fullscreenEnabled) &&
+    typeof HTMLElement.prototype.requestFullscreen === 'function';
 
   const containerRef = useRef<HTMLDivElement>(null);
   const hideTimerRef = useRef<any>(null);
@@ -86,6 +91,7 @@ export const ComicReader: React.FC<ComicReaderProps> = ({
     if (!fileList || fileList.length === 0) return;
 
     setIsImporting(true);
+    setImportErrorMessage(null);
     try {
       // Natural alphanumeric sort by filename so 01.JPG, 02.JPG, ... 17.JPG are in order
       const filesArray = Array.from(fileList).sort((a, b) =>
@@ -101,21 +107,36 @@ export const ComicReader: React.FC<ComicReaderProps> = ({
         });
       });
 
-      const dataUrls = await Promise.all(dataUrlPromises);
+      let dataUrls: string[];
+      try {
+        dataUrls = await Promise.all(dataUrlPromises);
+      } catch (err) {
+        console.error('Error reading imported pages:', err);
+        setImportErrorMessage('تعذر قراءة الصور المختارة، يرجى المحاولة مرة أخرى.');
+        setTimeout(() => setImportErrorMessage(null), 7000);
+        return;
+      }
 
       if (dataUrls.length > 0) {
         setPages(dataUrls);
         setBrokenPages({});
         setCurrentPage(0);
-        // Persist to browser's IndexedDB
-        if (comicId && chapterId) {
-          await saveChapterPages(comicId, chapterId, dataUrls);
+        setZoomLevel(1);
+        try {
+          // Persist to browser's IndexedDB
+          if (comicId && chapterId) {
+            await saveChapterPages(comicId, chapterId, dataUrls);
+          }
+          setImportSuccessMessage(`تم استيراد ${dataUrls.length} صفحة بنجاح وتثبيتها في قارئ الكوميكس!`);
+          setTimeout(() => setImportSuccessMessage(null), 5000);
+        } catch (err) {
+          console.error('Error saving imported pages:', err);
+          setImportErrorMessage(
+            'تم عرض الصفحات، لكن تعذر حفظها في المتصفح (قد تكون مساحة التخزين ممتلئة) وستختفي عند إغلاق القارئ.'
+          );
+          setTimeout(() => setImportErrorMessage(null), 7000);
         }
-        setImportSuccessMessage(`تم استيراد ${dataUrls.length} صفحة بنجاح وتثبيتها في قارئ الكوميكس!`);
-        setTimeout(() => setImportSuccessMessage(null), 5000);
       }
-    } catch (err) {
-      console.error('Error importing pages:', err);
     } finally {
       setIsImporting(false);
       if (fileInputRef.current) {
@@ -161,14 +182,27 @@ export const ComicReader: React.FC<ComicReaderProps> = ({
     }, 4000);
   };
 
+  // Fullscreen state follows the browser (Esc exits fullscreen without reaching our key handler)
+  useEffect(() => {
+    const handleFullscreenChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
   const toggleFullscreen = () => {
-    if (!document.fullscreenElement) {
-      containerRef.current?.requestFullscreen().catch(() => {});
-      setIsFullscreen(true);
-    } else {
-      document.exitFullscreen().catch(() => {});
-      setIsFullscreen(false);
+    if (document.fullscreenElement) {
+      document.exitFullscreen?.()?.catch(() => {});
+      return;
     }
+    const container = containerRef.current;
+    if (container && typeof container.requestFullscreen === 'function') {
+      container.requestFullscreen().catch(() => {});
+    }
+  };
+
+  const jumpToPage = (idx: number) => {
+    setCurrentPage(Math.max(0, Math.min(pages.length - 1, idx)));
+    setZoomLevel(1);
   };
 
   return (
@@ -193,6 +227,14 @@ export const ComicReader: React.FC<ComicReaderProps> = ({
         <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 bg-emerald-600 text-white px-5 py-2.5 rounded-2xl shadow-2xl flex items-center gap-2 border border-emerald-400 font-medium text-xs sm:text-sm animate-in fade-in slide-in-from-top-4">
           <CheckCircle2 className="w-5 h-5 text-emerald-100 flex-shrink-0" />
           <span>{importSuccessMessage}</span>
+        </div>
+      )}
+
+      {/* Import Error Banner */}
+      {importErrorMessage && (
+        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-2rem)] max-w-lg bg-rose-700 text-white px-5 py-2.5 rounded-2xl shadow-2xl flex items-center gap-2 border border-rose-400 font-medium text-xs sm:text-sm animate-in fade-in slide-in-from-top-4">
+          <X className="w-5 h-5 text-rose-100 flex-shrink-0" />
+          <span>{importErrorMessage}</span>
         </div>
       )}
 
@@ -304,47 +346,60 @@ export const ComicReader: React.FC<ComicReaderProps> = ({
             <BookOpen className="w-4 h-4" />
           </button>
 
-          {/* Fullscreen Toggle */}
-          <button
-            onClick={toggleFullscreen}
-            className="p-2 rounded-lg bg-neutral-900/80 hover:bg-neutral-800 text-neutral-300 border border-neutral-800 transition-colors cursor-pointer"
-            title="ملء الشاشة"
-          >
-            {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-          </button>
+          {/* Fullscreen Toggle (hidden where the browser has no element fullscreen, e.g. iPhone Safari) */}
+          {canFullscreen && (
+            <button
+              onClick={toggleFullscreen}
+              className="p-2 rounded-lg bg-neutral-900/80 hover:bg-neutral-800 text-neutral-300 border border-neutral-800 transition-colors cursor-pointer"
+              title="ملء الشاشة"
+            >
+              {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+            </button>
+          )}
         </div>
       </div>
 
       {/* Main Comic Viewer Area */}
       <div className="flex-1 w-full h-full overflow-auto flex items-center justify-center relative p-2 sm:p-4">
         {readingMode === 'single' ? (
-          <div className="relative w-full h-full flex items-center justify-center overflow-hidden">
-            {/* Click Left Zone to navigate */}
-            <div
-              onClick={nextPage}
-              className="absolute left-0 top-0 bottom-0 w-1/4 z-10 cursor-w-resize group flex items-center justify-start pl-4"
-              title="الصفحة التالية"
-            >
-              <div className="opacity-0 group-hover:opacity-100 transition-opacity bg-neutral-900/80 text-white p-3 rounded-full border border-neutral-700 shadow-xl backdrop-blur">
-                <ChevronLeft className="w-6 h-6" />
-              </div>
-            </div>
+          <div className="relative w-full h-full">
+            {/* Tap zones are hidden while zoomed in so the enlarged page can be panned */}
+            {zoomLevel <= 1 && (
+              <>
+                {/* Click Left Zone to navigate */}
+                <div
+                  onClick={nextPage}
+                  className="absolute left-0 top-0 bottom-0 w-1/4 z-10 cursor-w-resize group flex items-center justify-start pl-4"
+                  title="الصفحة التالية"
+                >
+                  <div className="opacity-0 group-hover:opacity-100 transition-opacity bg-neutral-900/80 text-white p-3 rounded-full border border-neutral-700 shadow-xl backdrop-blur">
+                    <ChevronLeft className="w-6 h-6" />
+                  </div>
+                </div>
 
-            {/* Click Right Zone to navigate */}
-            <div
-              onClick={prevPage}
-              className="absolute right-0 top-0 bottom-0 w-1/4 z-10 cursor-e-resize group flex items-center justify-end pr-4"
-              title="الصفحة السابقة"
-            >
-              <div className="opacity-0 group-hover:opacity-100 transition-opacity bg-neutral-900/80 text-white p-3 rounded-full border border-neutral-700 shadow-xl backdrop-blur">
-                <ChevronRight className="w-6 h-6" />
-              </div>
-            </div>
+                {/* Click Right Zone to navigate */}
+                <div
+                  onClick={prevPage}
+                  className="absolute right-0 top-0 bottom-0 w-1/4 z-10 cursor-e-resize group flex items-center justify-end pr-4"
+                  title="الصفحة السابقة"
+                >
+                  <div className="opacity-0 group-hover:opacity-100 transition-opacity bg-neutral-900/80 text-white p-3 rounded-full border border-neutral-700 shadow-xl backdrop-blur">
+                    <ChevronRight className="w-6 h-6" />
+                  </div>
+                </div>
+              </>
+            )}
 
+            {/* Scroll box: scrollable only when zoomed in. The page grows from its top-right corner
+                (RTL scroll origin) so every edge of the zoomed page stays reachable. */}
+            <div className={`absolute inset-0 flex ${zoomLevel > 1 ? 'overflow-auto' : 'overflow-hidden'}`}>
             {/* Current Active Page Image */}
             <div
-              className="relative max-h-full max-w-full flex items-center justify-center transition-transform duration-200 ease-out"
-              style={{ transform: `scale(${zoomLevel})` }}
+              className="relative m-auto min-w-0 max-h-full max-w-full flex items-center justify-center transition-transform duration-200 ease-out"
+              style={{
+                transform: `scale(${zoomLevel})`,
+                transformOrigin: zoomLevel > 1 ? 'top right' : 'center',
+              }}
             >
               {brokenPages[currentPage] ? (
                 <div className="w-[360px] sm:w-[500px] bg-neutral-900/90 border border-neutral-800 rounded-3xl flex flex-col items-center justify-center p-8 text-center text-white shadow-2xl backdrop-blur-xl">
@@ -366,7 +421,11 @@ export const ComicReader: React.FC<ComicReaderProps> = ({
                       className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-rose-600 to-rose-700 hover:from-rose-500 hover:to-rose-600 text-white font-bold text-xs sm:text-sm transition-all shadow-lg shadow-rose-950 flex items-center justify-center gap-2 cursor-pointer"
                     >
                       <Upload className="w-4 h-4" />
-                      <span>{isImporting ? 'جاري الاستيراد...' : '📂 اضغط هنا لاختيار وتثبيت الـ 17 صفحة من جهازك'}</span>
+                      <span>
+                        {isImporting
+                          ? 'جاري الاستيراد...'
+                          : `📂 اضغط هنا لاختيار وتثبيت صفحات الفصل (${pages.length} صفحة) من جهازك`}
+                      </span>
                     </button>
                   </div>
 
@@ -380,15 +439,16 @@ export const ComicReader: React.FC<ComicReaderProps> = ({
                   src={pages[currentPage]}
                   alt={`صفحة ${currentPage + 1}`}
                   onError={() => setBrokenPages((prev) => ({ ...prev, [currentPage]: true }))}
-                  className="max-h-[85vh] sm:max-h-[90vh] w-auto object-contain rounded-md shadow-2xl border border-neutral-800/80"
+                  className="max-w-full min-w-0 max-h-[85vh] sm:max-h-[90vh] w-auto object-contain rounded-md shadow-2xl border border-neutral-800/80"
                   referrerPolicy="no-referrer"
                 />
               )}
             </div>
+            </div>
           </div>
         ) : (
-          /* Webtoon Continuous Vertical Scroll Mode */
-          <div className="w-full max-w-3xl flex flex-col items-center gap-2 py-16">
+          /* Webtoon Continuous Vertical Scroll Mode (my-auto: a tall column must not overflow above the scroll start) */
+          <div className="w-full max-w-3xl my-auto flex flex-col items-center gap-2 py-16">
             {pages.map((pageUrl, idx) => (
               <div key={idx} className="w-full relative group">
                 {brokenPages[idx] ? (
@@ -455,7 +515,7 @@ export const ComicReader: React.FC<ComicReaderProps> = ({
               min="0"
               max={pages.length - 1}
               value={currentPage}
-              onChange={(e) => setCurrentPage(parseInt(e.target.value, 10))}
+              onChange={(e) => jumpToPage(parseInt(e.target.value, 10))}
               className="w-24 sm:w-36 h-1.5 bg-neutral-700 rounded-lg appearance-none cursor-pointer accent-rose-500 mr-2"
             />
           </div>
@@ -492,7 +552,7 @@ export const ComicReader: React.FC<ComicReaderProps> = ({
               <button
                 key={idx}
                 onClick={() => {
-                  setCurrentPage(idx);
+                  jumpToPage(idx);
                   setShowThumbnails(false);
                 }}
                 className={`relative aspect-[3/4] rounded-lg overflow-hidden border-2 transition-all cursor-pointer group ${

@@ -5,20 +5,54 @@ import {
   verifyAndUnlockPasscode,
 } from '../utils/accessGate.ts';
 import {
-  ADMIN_EMAIL,
   isVerifiedAdminUser,
   signInWithGoogleAdmin,
   signOutAdmin,
 } from '../firebase.ts';
 
+// Slow down guessing from the passcode form: after MAX_ATTEMPTS wrong codes the form locks for a while.
+// (Stored in localStorage so a page refresh doesn't reset it.)
+const ATTEMPTS_STORAGE_KEY = 'aniverse_gate_attempts_v1';
+const MAX_ATTEMPTS = 5;
+const LOCKOUT_MS = 60_000;
+
+interface AttemptState {
+  count: number;
+  lockedUntil: number;
+}
+
+function readAttempts(): AttemptState {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(ATTEMPTS_STORAGE_KEY) || '{}');
+    return {
+      count: typeof parsed.count === 'number' ? parsed.count : 0,
+      lockedUntil: typeof parsed.lockedUntil === 'number' ? parsed.lockedUntil : 0,
+    };
+  } catch {
+    return { count: 0, lockedUntil: 0 };
+  }
+}
+
+function writeAttempts(state: AttemptState | null): void {
+  try {
+    if (state) window.localStorage.setItem(ATTEMPTS_STORAGE_KEY, JSON.stringify(state));
+    else window.localStorage.removeItem(ATTEMPTS_STORAGE_KEY);
+  } catch {
+    // ignore storage errors
+  }
+}
+
 interface AccessGateScreenProps {
   gateConfig: AccessGateConfig;
   onUnlocked: () => void;
+  /** Owner sign-in is only offered when the site was opened with "#admin" in the URL */
+  showOwnerLogin?: boolean;
 }
 
 export const AccessGateScreen: React.FC<AccessGateScreenProps> = ({
   gateConfig,
   onUnlocked,
+  showOwnerLogin = false,
 }) => {
   const [codeInput, setCodeInput] = useState<string>('');
   const [showCode, setShowCode] = useState<boolean>(false);
@@ -33,14 +67,30 @@ export const AccessGateScreen: React.FC<AccessGateScreenProps> = ({
       return;
     }
 
+    const attempts = readAttempts();
+    const now = Date.now();
+    if (attempts.lockedUntil > now) {
+      const seconds = Math.ceil((attempts.lockedUntil - now) / 1000);
+      setErrorMsg(`محاولات خاطئة كثيرة. انتظر ${seconds} ثانية ثم حاول مجدداً.`);
+      return;
+    }
+
     setChecking(true);
     setErrorMsg(null);
     try {
       const ok = await verifyAndUnlockPasscode(codeInput, gateConfig);
       if (ok) {
+        writeAttempts(null);
         onUnlocked();
       } else {
-        setErrorMsg('رمز الدخول غير صحيح. تأكد من الرمز وحاول مرة أخرى.');
+        const count = (attempts.lockedUntil && attempts.lockedUntil <= now ? 0 : attempts.count) + 1;
+        if (count >= MAX_ATTEMPTS) {
+          writeAttempts({ count: 0, lockedUntil: now + LOCKOUT_MS });
+          setErrorMsg(`محاولات خاطئة كثيرة. تم إيقاف المحاولة لمدة ${LOCKOUT_MS / 1000} ثانية.`);
+        } else {
+          writeAttempts({ count, lockedUntil: 0 });
+          setErrorMsg(`رمز الدخول غير صحيح. تبقّى ${MAX_ATTEMPTS - count} محاولات قبل الإيقاف المؤقت.`);
+        }
       }
     } catch {
       setErrorMsg('تعذر التحقق من الرمز في هذا المتصفح.');
@@ -58,7 +108,7 @@ export const AccessGateScreen: React.FC<AccessGateScreenProps> = ({
         onUnlocked();
       } else {
         await signOutAdmin();
-        setErrorMsg(`الدخول التلقائي مخصص لبريد المالك فقط (${ADMIN_EMAIL}). يرجى إدخال رمز الدعوة.`);
+        setErrorMsg('هذا الحساب لا يملك صلاحية المشرف. يرجى إدخال رمز الدعوة.');
       }
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'تعذر تسجيل الدخول بحساب Google.');
@@ -156,18 +206,20 @@ export const AccessGateScreen: React.FC<AccessGateScreenProps> = ({
           </button>
         </form>
 
-        {/* Owner Direct Sign-In */}
-        <div className="pt-4 border-t border-neutral-800/80 flex flex-col items-center gap-2 text-center">
-          <button
-            type="button"
-            onClick={handleOwnerLogin}
-            disabled={adminLoading}
-            className="text-xs font-bold text-neutral-400 hover:text-amber-400 transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
-          >
-            <LogIn className="w-3.5 h-3.5" />
-            <span>{adminLoading ? 'جاري فتح نافذة Google...' : 'دخول مالك الموقع مباشرة (Google)'}</span>
-          </button>
-        </div>
+        {/* Owner Direct Sign-In (hidden unless the site was opened with #admin) */}
+        {showOwnerLogin && (
+          <div className="pt-4 border-t border-neutral-800/80 flex flex-col items-center gap-2 text-center">
+            <button
+              type="button"
+              onClick={handleOwnerLogin}
+              disabled={adminLoading}
+              className="text-xs font-bold text-neutral-400 hover:text-amber-400 transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+            >
+              <LogIn className="w-3.5 h-3.5" />
+              <span>{adminLoading ? 'جاري فتح نافذة Google...' : 'دخول مالك الموقع مباشرة (Google)'}</span>
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

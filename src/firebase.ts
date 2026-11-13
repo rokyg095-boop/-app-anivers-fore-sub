@@ -13,12 +13,13 @@ import {
   getDocFromServer,
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
+import { ADMIN_EMAIL } from './adminConfig.ts';
 
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 
-export const ADMIN_EMAIL = 'rokyg095@gmail.com';
+export { ADMIN_EMAIL };
 
 const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
@@ -81,8 +82,25 @@ export function isVerifiedAdminUser(user: User | null): boolean {
 }
 
 export async function signInWithGoogleAdmin(): Promise<User> {
-  const result = await signInWithPopup(auth, googleProvider);
-  return result.user;
+  try {
+    const result = await signInWithPopup(auth, googleProvider);
+    return result.user;
+  } catch (err) {
+    const code = (err as { code?: string })?.code || '';
+    if (code === 'auth/unauthorized-domain') {
+      throw new Error(
+        `لا يمكن تسجيل الدخول بحساب Google من هذا العنوان (${window.location.hostname}). ` +
+          'افتح الموقع عبر localhost على الكمبيوتر، أو أضف هذا العنوان في Firebase Console ← Authentication ← Settings ← Authorized domains.'
+      );
+    }
+    if (code === 'auth/popup-blocked') {
+      throw new Error('المتصفح منع نافذة تسجيل الدخول — اسمح بالنوافذ المنبثقة لهذا الموقع ثم حاول مجدداً.');
+    }
+    if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+      throw new Error('تم إغلاق نافذة تسجيل الدخول قبل الإكمال.');
+    }
+    throw err;
+  }
 }
 
 export async function signOutAdmin(): Promise<void> {

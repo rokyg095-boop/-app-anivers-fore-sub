@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Play, Tv, Star, Mic, Layers, ChevronLeft } from 'lucide-react';
 import { DubSeries, DubEpisode } from '../data/mockData.ts';
-import { getCustomEpisodeSource, SOURCES_UPDATED_EVENT } from '../utils/videoSource';
+import { isEpisodePlayable, SOURCES_UPDATED_EVENT } from '../utils/videoSource';
 
 interface DubSeriesCardProps {
   series: DubSeries;
@@ -26,10 +26,8 @@ export const DubSeriesCard: React.FC<DubSeriesCardProps> = ({
     series.episodes && series.episodes.length > 0
       ? series.episodes
       : (series.seasons[0]?.episodes || []);
-  const firstPlayableEpisode =
-    seriesEpisodes.find(
-      (e) => !e.isComingSoon || Boolean(getCustomEpisodeSource(e.id)?.driveLink)
-    ) || seriesEpisodes[0];
+  // Not-yet-linked catalog episodes are skipped; admin-linked ones count as playable
+  const firstPlayableEpisode = seriesEpisodes.find((e) => isEpisodePlayable(e));
 
   return (
     <div className="group relative bg-neutral-900 border border-neutral-800 rounded-3xl overflow-hidden hover:border-neutral-700 transition-all duration-300 flex flex-col shadow-xl hover:shadow-2xl hover:shadow-rose-950/20">
@@ -110,14 +108,14 @@ export const DubSeriesCard: React.FC<DubSeriesCardProps> = ({
             <ChevronLeft className="w-3 h-3 text-neutral-400" />
           </button>
 
-          {firstPlayableEpisode && !firstPlayableEpisode.isComingSoon && (
+          {firstPlayableEpisode && (
             <button
               onClick={() => onQuickPlay(firstPlayableEpisode, series)}
               className="py-2 px-3 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-xl flex items-center gap-1 transition-colors cursor-pointer shadow-md shadow-rose-950"
-              title="مشاهدة الحلقة الأولى الآن"
+              title={`مشاهدة الحلقة ${firstPlayableEpisode.episodeNumber} الآن`}
             >
               <Play className="w-3.5 h-3.5 fill-white" />
-              <span>الحلقة 1</span>
+              <span>الحلقة {firstPlayableEpisode.episodeNumber}</span>
             </button>
           )}
         </div>
