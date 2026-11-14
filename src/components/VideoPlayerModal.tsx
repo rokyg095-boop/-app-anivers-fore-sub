@@ -300,6 +300,14 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
     }
   };
 
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(Boolean(document.fullscreenElement));
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
   const formatTime = (secs: number) => {
     if (isNaN(secs)) return '00:00';
     const m = Math.floor(secs / 60);
@@ -366,8 +374,8 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
 
       {/* Main Cinema Container */}
       <div
-        className={`relative w-full bg-neutral-950 border border-neutral-800/80 rounded-none sm:rounded-3xl overflow-hidden shadow-[0_0_100px_rgba(0,0,0,0.9)] flex flex-col transition-all duration-300 my-auto ${
-          isTheaterMode ? 'max-w-[98vw] max-h-[98vh]' : 'max-w-6xl max-h-[94vh]'
+        className={`relative w-full h-full sm:h-auto bg-neutral-950 border border-neutral-800/80 rounded-none sm:rounded-3xl overflow-hidden shadow-[0_0_100px_rgba(0,0,0,0.9)] flex flex-col transition-all duration-300 my-auto ${
+          isTheaterMode ? 'max-w-[98vw] max-h-screen sm:max-h-[98vh]' : 'max-w-6xl max-h-screen sm:max-h-[94vh]'
         }`}
       >
         {/* Cinema Top Bar */}
@@ -423,75 +431,83 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
           </div>
         </div>
 
-        {/* Multi-Account Server Switcher Bar (Shown whenever an episode has 2+ Drive links) */}
-        {availableServers.length > 1 && (
-          <div className="px-4 sm:px-6 py-2 bg-neutral-900/80 border-b border-neutral-800 flex items-center gap-2 overflow-x-auto text-xs">
-            <span className="text-neutral-400 font-bold shrink-0">سيرفرات التشغيل (حسابات Drive):</span>
-            {availableServers.map((srv, idx) => (
-              <button
-                key={srv.id}
-                onClick={() => {
-                  setActiveServerIdx(idx);
-                  setNativeFailed(false);
-                  setPlayerEngine('native');
-                }}
-                className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer shrink-0 ${
-                  activeServerIdx === idx
-                    ? 'bg-rose-600 text-white shadow'
-                    : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700 border border-neutral-700'
-                }`}
-              >
-                {srv.label}
-              </button>
-            ))}
-          </div>
-        )}
+        {/* Scrollable Cinema Body (keeps video screen at full size regardless of episode count) */}
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain flex flex-col">
+          {/* Multi-Account Server Switcher Bar (Shown whenever an episode has 2+ Drive links) */}
+          {availableServers.length > 1 && (
+            <div className="px-4 sm:px-6 py-2 bg-neutral-900/80 border-b border-neutral-800 flex items-center gap-2 overflow-x-auto text-xs shrink-0">
+              <span className="text-neutral-400 font-bold shrink-0">سيرفرات التشغيل (حسابات Drive):</span>
+              {availableServers.map((srv, idx) => (
+                <button
+                  key={srv.id}
+                  onClick={() => {
+                    setActiveServerIdx(idx);
+                    setNativeFailed(false);
+                    setPlayerEngine('native');
+                  }}
+                  className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer shrink-0 ${
+                    activeServerIdx === idx
+                      ? 'bg-rose-600 text-white shadow'
+                      : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700 border border-neutral-700'
+                  }`}
+                >
+                  {srv.label}
+                </button>
+              ))}
+            </div>
+          )}
 
-        {/* Video Screen Viewport */}
-        <div
-          ref={containerRef}
-          onMouseMove={handleActivity}
-          onTouchStart={handleActivity}
-          className="relative aspect-video w-full bg-black flex items-center justify-center overflow-hidden select-none group"
-        >
-          {playerEngine === 'embed' && driveEmbedUrl ? (
-            /* Seamless Cloud Stream Engine (Auto-switched if direct video stream is restricted) */
-            <div className="w-full h-full relative">
-              <iframe
-                src={driveEmbedUrl}
-                title={episode.title}
-                className="w-full h-full border-0"
-                allow="autoplay; fullscreen"
-                allowFullScreen
-              />
-            </div>
-          ) : !hasPlayableSource ? (
-            /* Coming Soon cinematic banner */
-            <div className="relative w-full h-full bg-neutral-950 flex flex-col items-center justify-center text-center p-6">
-              <img
-                src={episode.thumbnail}
-                alt={episode.title}
-                className="absolute inset-0 w-full h-full object-cover opacity-20 blur-sm"
-                referrerPolicy="no-referrer"
-              />
-              <div className="relative z-10 flex flex-col items-center max-w-md">
-                <div className="w-16 h-16 rounded-3xl bg-amber-500/20 text-amber-400 flex items-center justify-center mb-4 border border-amber-500/30">
-                  <Lock className="w-8 h-8" />
-                </div>
-                <h3 className="text-xl font-black text-white mb-2">{episode.title}</h3>
-                <p className="text-xs sm:text-sm text-neutral-400 leading-relaxed mb-4">
-                  الحلقة قيد التجهيز بالدبلجة العربية الرسمية وستتوفر قريباً للمشاهدة فور اكتمال معالجة البث!
-                </p>
+          {/* Video Screen Viewport */}
+          <div
+            ref={containerRef}
+            onMouseMove={handleActivity}
+            onTouchStart={handleActivity}
+            className={`relative w-full shrink-0 bg-black flex items-center justify-center overflow-hidden select-none group ${
+              isFullscreen
+                ? 'h-screen w-screen max-h-none'
+                : isTheaterMode
+                ? 'aspect-video min-h-[220px] sm:min-h-[360px] max-h-[82vh]'
+                : 'aspect-video min-h-[200px] sm:min-h-[320px] max-h-[68vh] sm:max-h-[75vh]'
+            }`}
+          >
+            {playerEngine === 'embed' && driveEmbedUrl ? (
+              /* Seamless Cloud Stream Engine (Auto-switched if direct video stream is restricted) */
+              <div className="absolute inset-0 w-full h-full">
+                <iframe
+                  src={driveEmbedUrl}
+                  title={episode.title}
+                  className="w-full h-full border-0"
+                  allow="autoplay; fullscreen"
+                  allowFullScreen
+                />
               </div>
-            </div>
-          ) : (
-            <>
-              {/* Native Cinema <video> Player */}
-              <video
-                key={`${streamUrl}-${selectedSubtitleLang}`}
-                ref={videoRef}
-                src={streamUrl}
-                poster={episode.thumbnail}
+            ) : !hasPlayableSource ? (
+              /* Coming Soon cinematic banner */
+              <div className="absolute inset-0 w-full h-full bg-neutral-950 flex flex-col items-center justify-center text-center p-6">
+                <img
+                  src={episode.thumbnail}
+                  alt={episode.title}
+                  className="absolute inset-0 w-full h-full object-cover opacity-20 blur-sm"
+                  referrerPolicy="no-referrer"
+                />
+                <div className="relative z-10 flex flex-col items-center max-w-md">
+                  <div className="w-16 h-16 rounded-3xl bg-amber-500/20 text-amber-400 flex items-center justify-center mb-4 border border-amber-500/30">
+                    <Lock className="w-8 h-8" />
+                  </div>
+                  <h3 className="text-xl font-black text-white mb-2">{episode.title}</h3>
+                  <p className="text-xs sm:text-sm text-neutral-400 leading-relaxed mb-4">
+                    الحلقة قيد التجهيز بالدبلجة العربية الرسمية وستتوفر قريباً للمشاهدة فور اكتمال معالجة البث!
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* Native Cinema <video> Player */}
+                <video
+                  key={`${streamUrl}-${selectedSubtitleLang}`}
+                  ref={videoRef}
+                  src={streamUrl || undefined}
+                  poster={episode.thumbnail}
                 onTimeUpdate={handleTimeUpdate}
                 onLoadedMetadata={handleLoadedMetadata}
                 onEnded={() => {
@@ -761,8 +777,8 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
           )}
         </div>
 
-        {/* Pure Viewer Details & Episode Selection Panel */}
-        <div className="p-4 sm:p-6 bg-neutral-950 border-t border-neutral-900 overflow-y-auto space-y-6">
+          {/* Pure Viewer Details & Episode Selection Panel */}
+          <div className="p-4 sm:p-6 bg-neutral-950 border-t border-neutral-900 space-y-6 shrink-0">
           {/* Episode Title & Description */}
           <div className="flex flex-col lg:flex-row items-start justify-between gap-4">
             <div className="space-y-2 flex-1">
@@ -883,6 +899,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
               })}
             </div>
           </div>
+        </div>
         </div>
       </div>
     </div>
