@@ -14,9 +14,9 @@ import {
 } from 'firebase/firestore';
 import { auth, db, handleFirestoreError, isVerifiedAdminUser, OperationType } from '../firebase.ts';
 import { DubEpisode, DubSeason, DubSeries } from '../data/mockData.ts';
-import { SOURCES_UPDATED_EVENT } from './videoSource.ts';
+import { SOURCES_UPDATED_EVENT, truncateUtf8 } from './videoSource.ts';
 
-export type CustomWorkCategory = 'anime' | 'movie' | 'dubbed';
+export type CustomWorkCategory = 'anime' | 'movie' | 'dubbed' | 'tv';
 
 export interface CustomWorkRecord {
   workId: string;
@@ -69,12 +69,37 @@ export function generateWorkId(category: CustomWorkCategory, title: string): str
     .slice(0, 32);
   const stamp = Date.now().toString(36);
   const rand = Math.random().toString(36).slice(2, 6);
-  return `cw-${category}-${slug || 'work'}-${stamp}-${rand}`.slice(0, 120);
+  return `cw-${category}-${slug || 'work'}-${stamp}-${rand}`.slice(0, 100);
+}
+
+export function formatCloudErrorMessage(err: unknown, fallback: string): string {
+  const raw = err instanceof Error ? err.message : String(err || '');
+  if (!raw) return fallback;
+  if (raw === 'ADMIN_AUTH_REQUIRED') {
+    return 'يرجى تسجيل الدخول بحساب المالك الموثق عبر Google للحفظ الدائم في السحابة.';
+  }
+  try {
+    const parsed = JSON.parse(raw) as { error?: string };
+    const inner = String(parsed?.error || '');
+    if (/permission|insufficient/i.test(inner)) {
+      return 'تم رفض الحفظ من السحابة — تأكد من تسجيل الدخول بحساب المالك الموثق عبر Google وأن الصورة والنصوص ضمن الحجم المسموح.';
+    }
+    if (/network|offline|unavailable/i.test(inner)) {
+      return 'تعذر الاتصال بالسحابة حالياً. تحقق من اتصال الإنترنت وحاول مرة أخرى.';
+    }
+    if (inner) return inner;
+  } catch {
+    // Non-JSON error message
+  }
+  if (/permission|insufficient/i.test(raw)) {
+    return 'تم رفض الحفظ من السحابة — تأكد من تسجيل الدخول بحساب المالك عبر Google.';
+  }
+  return raw;
 }
 
 /**
- * Compresses an uploaded image file to a fast, compact JPEG Data URL under ~320KB
- * so it stays well within Firestore's document size limits while looking crisp.
+ * Compresses an uploaded image file to a fast, compact JPEG Data URL under ~350KB
+ * so it stays well within Firestore's field & document size limits while looking crisp.
  */
 export async function compressImageFileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -82,7 +107,8 @@ export async function compressImageFileToDataUrl(file: File): Promise<string> {
     reader.onerror = () => reject(new Error('تعذر قراءة ملف الصورة'));
     reader.onload = () => {
       const img = new Image();
-      img.onerror = () => reject(new Error('الملف المختار ليس صورة صالحة'));
+      img.onerror = () =>
+        reject(new Error('تعذر قراءة هذه الصورة — جرب صورة بصيغة JPG أو PNG أو ضع رابط صورة مباشر'));
       img.onload = () => {
         const maxDim = 640;
         let { width, height } = img;
@@ -101,27 +127,33 @@ export async function compressImageFileToDataUrl(file: File): Promise<string> {
         canvas.height = Math.max(1, height);
         const ctx = canvas.getContext('2d');
         if (!ctx) {
-          reject(new Error('تعذر معالجة الصورة'));
+          reject(new Error('تعذر معالجة الصورة في المتصفح'));
           return;
         }
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-        let quality = 0.84;
+        let quality = 0.82;
         let dataUrl = canvas.toDataURL('image/jpeg', quality);
-        while (dataUrl.length > 350000 && quality > 0.35) {
+        while (dataUrl.length > 320000 && quality > 0.3) {
           quality -= 0.12;
           dataUrl = canvas.toDataURL('image/jpeg', quality);
         }
 
-        if (dataUrl.length > 390000) {
+        let scale = 0.72;
+        while (dataUrl.length > 370000 && scale >= 0.35) {
           const smallCanvas = document.createElement('canvas');
-          smallCanvas.width = Math.round(canvas.width * 0.7);
-          smallCanvas.height = Math.round(canvas.height * 0.7);
+          smallCanvas.width = Math.max(120, Math.round(canvas.width * scale));
+          smallCanvas.height = Math.max(120, Math.round(canvas.height * scale));
           const sCtx = smallCanvas.getContext('2d');
-          if (sCtx) {
-            sCtx.drawImage(canvas, 0, 0, smallCanvas.width, smallCanvas.height);
-            dataUrl = smallCanvas.toDataURL('image/jpeg', 0.72);
-          }
+          if (!sCtx) break;
+          sCtx.drawImage(canvas, 0, 0, smallCanvas.width, smallCanvas.height);
+          dataUrl = smallCanvas.toDataURL('image/jpeg', 0.68);
+          scale -= 0.15;
+        }
+
+        if (dataUrl.length > 395000) {
+          reject(new Error('حجم الصورة كبير جداً حتى بعد الضغط — اختر صورة أصغر أو الصق رابط صورة مباشر.'));
+          return;
         }
 
         resolve(dataUrl);
@@ -143,7 +175,7 @@ function docDataToCustomWork(workId: string, data: Record<string, unknown>): Cus
 
   const catRaw = String(data.category || 'anime');
   const category: CustomWorkCategory =
-    catRaw === 'movie' || catRaw === 'dubbed' ? catRaw : 'anime';
+    catRaw === 'movie' || catRaw === 'dubbed' || catRaw === 'tv' ? catRaw : 'anime';
 
   return {
     workId,
@@ -322,24 +354,26 @@ export async function saveCustomWorkToCloud(
     throw new Error('يجب تسجيل الدخول بحساب المشرف لحفظ العمل في سحابة Firebase.');
   }
 
-  const workId = (input.workId?.trim() || generateWorkId(input.category, input.title)).slice(0, 128);
+  const workId = (input.workId?.trim() || generateWorkId(input.category, input.title)).slice(0, 100);
   if (!VALID_ID_REGEX.test(workId)) {
     throw new Error('معرّف العمل غير صالح.');
   }
 
-  const sanitizedTitle = input.title.trim().slice(0, 200);
-  const sanitizedSynopsis = input.synopsis.trim().slice(0, 4000);
-  const sanitizedCover = input.coverImage.trim().slice(0, 400000);
-  const sanitizedBanner = (input.bannerImage?.trim() || sanitizedCover).slice(0, 400000);
-  const sanitizedOriginal = (input.originalTitle || '').trim().slice(0, 200);
-  const sanitizedStudio = (input.dubStudio || 'إضافة المالك').trim().slice(0, 120);
+  const sanitizedTitle = truncateUtf8(input.title.trim(), 200);
+  const sanitizedSynopsis = truncateUtf8(input.synopsis.trim(), 4000);
+  const sanitizedCover = truncateUtf8(input.coverImage.trim(), 400000);
+  const sanitizedBanner = truncateUtf8(input.bannerImage?.trim() || sanitizedCover, 400000);
+  const sanitizedOriginal = truncateUtf8((input.originalTitle || '').trim(), 200);
+  const sanitizedStudio = truncateUtf8((input.dubStudio || 'إضافة المالك').trim(), 120);
   const sanitizedGenres =
     input.genres
-      .map((g) => g.trim().slice(0, 40))
+      .map((g) => truncateUtf8(g.trim(), 40))
       .filter(Boolean)
       .slice(0, 8);
   if (sanitizedGenres.length === 0) {
-    sanitizedGenres.push(input.category === 'movie' ? 'سينما' : 'مغامرات');
+    sanitizedGenres.push(
+      input.category === 'movie' ? 'سينما' : input.category === 'tv' ? 'دراما' : 'مغامرات'
+    );
   }
   const sanitizedRating = Math.min(10, Math.max(0, Number(input.rating) || 9.0));
   const sanitizedSeasons =

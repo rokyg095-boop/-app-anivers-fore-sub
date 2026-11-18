@@ -11,25 +11,21 @@ import {
   Subtitles,
   Tv,
   Check,
-  Film,
-  Sparkles,
   Lock,
   ChevronRight,
   ChevronLeft,
   X,
-  Info,
   Layers,
-  Settings,
   ShieldCheck,
-  FastForward
+  Expand
 } from 'lucide-react';
 import { DubEpisode } from '../data/mockData.ts';
 import {
   extractDriveFileId,
   isGoogleDriveSource,
-  getDriveDirectStreamUrl,
   normalizeDriveDirectUrl,
   getDrivePreviewUrl,
+  getYouTubeEmbedUrl,
   getCustomEpisodeSource,
   getAvailableDriveServers,
   CustomEpisodeConfig,
@@ -66,10 +62,16 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
   const [volume, setVolume] = useState<number>(0.9);
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
-  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const [isNativeFullscreen, setIsNativeFullscreen] = useState<boolean>(false);
+  const [isPseudoFullscreen, setIsPseudoFullscreen] = useState<boolean>(false);
   const [isTheaterMode, setIsTheaterMode] = useState<boolean>(false);
+  const [videoFitMode, setVideoFitMode] = useState<'contain' | 'cover'>('contain');
   const [showControls, setShowControls] = useState<boolean>(true);
   const [playFeedback, setPlayFeedback] = useState<'play' | 'pause' | null>(null);
+  const [viewportWidth, setViewportWidth] = useState<number>(0);
+  const [viewportHeight, setViewportHeight] = useState<number>(0);
+
+  const isFullscreen = isNativeFullscreen || isPseudoFullscreen;
 
   // Subtitles state
   const [availableSubtitles, setAvailableSubtitles] = useState<SubtitleTrack[]>([]);
@@ -128,15 +130,32 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
     ? episode.videoUrl.replace('/public/', '/')
     : episode.videoUrl || '';
 
-  // Direct high-quality download streaming starting with https://drive.google.com/uc?export=download&id=
+  // Same-origin Range proxy stream avoids Google Drive CORP: same-site blocking on browsers & iOS Safari
   if (isDrive && driveFileId) {
-    streamUrl = getDriveDirectStreamUrl(driveFileId);
+    streamUrl = `/api/drive-stream/${encodeURIComponent(driveFileId)}`;
   } else if (configuredDrive) {
     streamUrl = normalizeDriveDirectUrl(configuredDrive);
   }
 
-  const driveEmbedUrl = driveFileId ? getDrivePreviewUrl(driveFileId) : null;
+  const youtubeEmbedUrl = getYouTubeEmbedUrl(configuredDrive);
+  const driveEmbedUrl = driveFileId ? getDrivePreviewUrl(driveFileId) : youtubeEmbedUrl;
   const hasPlayableSource = Boolean(streamUrl || driveEmbedUrl || !episode.isComingSoon);
+
+  // If link is YouTube, always play using embed engine
+  useEffect(() => {
+    if (youtubeEmbedUrl) {
+      setPlayerEngine('embed');
+    }
+  }, [youtubeEmbedUrl, episode.id]);
+
+  // Lock background page scroll while player modal is open
+  useEffect(() => {
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, []);
 
   // Episode indices for Prev/Next
   const currentIndex = allEpisodes.findIndex((e) => e.id === episode.id);
@@ -290,23 +309,95 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
     }
   };
 
-  const toggleFullscreen = () => {
-    if (!document.fullscreenElement) {
-      containerRef.current?.requestFullscreen().catch(() => {});
-      setIsFullscreen(true);
-    } else {
-      document.exitFullscreen().catch(() => {});
-      setIsFullscreen(false);
+  const exitAllFullscreen = useCallback(() => {
+    const doc = document as Document & {
+      webkitFullscreenElement?: Element | null;
+      webkitExitFullscreen?: () => Promise<void> | void;
+    };
+    if (doc.fullscreenElement && typeof doc.exitFullscreen === 'function') {
+      void doc.exitFullscreen().catch(() => {});
+    } else if (doc.webkitFullscreenElement && typeof doc.webkitExitFullscreen === 'function') {
+      try {
+        void Promise.resolve(doc.webkitExitFullscreen()).catch(() => {});
+      } catch {
+        // Ignore
+      }
     }
-  };
+    setIsNativeFullscreen(false);
+    setIsPseudoFullscreen(false);
+  }, []);
+
+  const toggleFullscreen = useCallback(() => {
+    if (isFullscreen) {
+      exitAllFullscreen();
+      return;
+    }
+
+    const el = containerRef.current as
+      | (HTMLDivElement & { webkitRequestFullscreen?: () => Promise<void> | void })
+      | null;
+
+    if (!el) {
+      setIsPseudoFullscreen(true);
+      return;
+    }
+
+    if (typeof el.requestFullscreen === 'function') {
+      el.requestFullscreen()
+        .then(() => {
+          setIsNativeFullscreen(true);
+        })
+        .catch(() => {
+          setIsPseudoFullscreen(true);
+        });
+    } else if (typeof el.webkitRequestFullscreen === 'function') {
+      try {
+        Promise.resolve(el.webkitRequestFullscreen())
+          .then(() => {
+            setIsNativeFullscreen(true);
+          })
+          .catch(() => {
+            setIsPseudoFullscreen(true);
+          });
+      } catch {
+        setIsPseudoFullscreen(true);
+      }
+    } else {
+      // iOS iPhone Safari & WebViews without element fullscreen API: full-viewport CSS cinema mode
+      setIsPseudoFullscreen(true);
+    }
+  }, [isFullscreen, exitAllFullscreen]);
 
   useEffect(() => {
     const handleFullscreenChange = () => {
-      setIsFullscreen(Boolean(document.fullscreenElement));
+      const doc = document as Document & { webkitFullscreenElement?: Element | null };
+      const active = Boolean(doc.fullscreenElement || doc.webkitFullscreenElement);
+      setIsNativeFullscreen(active);
     };
     document.addEventListener('fullscreenchange', handleFullscreenChange);
-    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+    };
   }, []);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const updateSize = () => {
+      setViewportWidth(el.clientWidth || 0);
+      setViewportHeight(el.clientHeight || 0);
+    };
+    updateSize();
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(updateSize);
+      observer.observe(el);
+      return () => observer.disconnect();
+    }
+    window.addEventListener('resize', updateSize);
+    return () => window.removeEventListener('resize', updateSize);
+  }, [isPseudoFullscreen, isTheaterMode, playerEngine]);
 
   const formatTime = (secs: number) => {
     if (isNaN(secs)) return '00:00';
@@ -340,8 +431,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
         applySubtitleSelection(selectedSubtitleLang === 'off' ? 'ar' : 'off');
       } else if (e.key === 'Escape') {
         if (isFullscreen) {
-          document.exitFullscreen().catch(() => {});
-          setIsFullscreen(false);
+          exitAllFullscreen();
         } else {
           onClose();
         }
@@ -349,7 +439,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [togglePlay, isFullscreen, selectedSubtitleLang, onClose]);
+  }, [togglePlay, toggleFullscreen, exitAllFullscreen, isFullscreen, selectedSubtitleLang, onClose]);
 
   // Touch and mouse movement auto-hide controls
   const handleActivity = () => {
@@ -366,38 +456,59 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-xl p-0 sm:p-4 overflow-y-auto"
+      className={`fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-xl overflow-hidden ${
+        isPseudoFullscreen ? 'p-0' : 'p-0 sm:p-4'
+      }`}
       dir="rtl"
     >
       {/* Ambient Cinema Backdrop Glow */}
-      <div className="absolute inset-0 bg-radial from-rose-950/20 via-transparent to-black pointer-events-none" />
+      {!isPseudoFullscreen && (
+        <div className="absolute inset-0 bg-radial from-rose-950/20 via-transparent to-black pointer-events-none" />
+      )}
 
       {/* Main Cinema Container */}
       <div
-        className={`relative w-full h-full sm:h-auto bg-neutral-950 border border-neutral-800/80 rounded-none sm:rounded-3xl overflow-hidden shadow-[0_0_100px_rgba(0,0,0,0.9)] flex flex-col transition-all duration-300 my-auto ${
-          isTheaterMode ? 'max-w-[98vw] max-h-screen sm:max-h-[98vh]' : 'max-w-6xl max-h-screen sm:max-h-[94vh]'
-        }`}
+        className={
+          isPseudoFullscreen
+            ? 'relative w-full h-[100dvh] bg-black flex flex-col overflow-hidden'
+            : `relative w-full h-[100dvh] sm:h-auto bg-neutral-950 border border-neutral-800/80 rounded-none sm:rounded-3xl overflow-hidden shadow-[0_0_100px_rgba(0,0,0,0.9)] flex flex-col my-auto ${
+                isTheaterMode
+                  ? 'max-w-[98vw] max-h-[100dvh] sm:max-h-[98dvh]'
+                  : 'max-w-6xl max-h-[100dvh] sm:max-h-[94dvh]'
+              }`
+        }
       >
         {/* Cinema Top Bar */}
-        <div className="flex items-center justify-between px-4 sm:px-6 py-3 bg-neutral-950/90 border-b border-neutral-900 shrink-0 z-20">
-          <div className="flex items-center gap-3 min-w-0">
-            <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping shrink-0" />
+        <div
+          className={`${
+            isPseudoFullscreen ? 'hidden' : 'flex'
+          } items-center justify-between px-3 sm:px-6 py-2.5 sm:py-3 bg-neutral-950/95 border-b border-neutral-900 shrink-0 z-20 gap-2`}
+        >
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             <div className="min-w-0">
-              <h2 className="text-sm sm:text-base font-black text-white truncate">
+              <h2 className="text-xs sm:text-base font-black text-white truncate">
                 {seriesTitle} <span className="text-rose-500 mx-1">·</span> {episode.title}
               </h2>
             </div>
-            <span className="hidden md:inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-300 border border-rose-500/20">
-              <Sparkles className="w-3 h-3 text-amber-400" />
-              عرض سينمائي HD
-            </span>
           </div>
 
-          <div className="flex items-center gap-2">
-            {/* Quick Cinema / Theater Mode toggle */}
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {/* Always-Visible Enlarge / Fullscreen Button (works on iPhone, Android, Desktop, and Drive Embeds) */}
             <button
+              type="button"
+              onClick={toggleFullscreen}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[11px] sm:text-xs font-bold border bg-rose-600/20 hover:bg-rose-600/35 text-rose-300 border-rose-500/40 transition-colors cursor-pointer"
+              title="تكبير الشاشة لملء الهاتف"
+            >
+              {isFullscreen ? <Minimize className="w-3.5 h-3.5" /> : <Maximize className="w-3.5 h-3.5" />}
+              <span>{isFullscreen ? 'تصغير' : 'تكبير الشاشة'}</span>
+            </button>
+
+            {/* Quick Cinema / Theater Mode toggle (Desktop) */}
+            <button
+              type="button"
               onClick={() => setIsTheaterMode(!isTheaterMode)}
-              className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
+              className={`hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
                 isTheaterMode
                   ? 'bg-rose-600/20 text-rose-300 border-rose-500/40'
                   : 'bg-neutral-900 text-neutral-400 hover:text-white border-neutral-800'
@@ -408,11 +519,12 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
               <span>{isTheaterMode ? 'شاشة قياسية' : 'المسرح السينمائي'}</span>
             </button>
 
-            {/* Discreet Admin Gateway (Only visible if requested or owner clicks) */}
+            {/* Discreet Admin Gateway (Only visible for verified owner) */}
             {onOpenAdmin && (
               <button
+                type="button"
                 onClick={onOpenAdmin}
-                className="p-1.5 sm:px-2.5 sm:py-1 rounded-xl bg-neutral-900/60 hover:bg-neutral-800 text-neutral-500 hover:text-amber-400 transition-colors border border-neutral-800 text-xs font-mono flex items-center gap-1 cursor-pointer"
+                className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl bg-neutral-900/60 hover:bg-neutral-800 text-neutral-500 hover:text-amber-400 transition-colors border border-neutral-800 text-xs font-mono flex items-center gap-1 cursor-pointer"
                 title="لوحة تحكم المشرف (خاصة)"
               >
                 <ShieldCheck className="w-3.5 h-3.5" />
@@ -422,6 +534,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
 
             {/* Close Button */}
             <button
+              type="button"
               onClick={onClose}
               className="w-8 h-8 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-white flex items-center justify-center border border-neutral-800 transition-colors cursor-pointer"
               title="إغلاق (Esc)"
@@ -432,11 +545,15 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
         </div>
 
         {/* Scrollable Cinema Body (keeps video screen at full size regardless of episode count) */}
-        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain flex flex-col">
+        <div
+          className={`flex-1 min-h-0 flex flex-col ${
+            isPseudoFullscreen ? 'overflow-hidden h-full' : 'overflow-y-auto overscroll-contain'
+          }`}
+        >
           {/* Multi-Account Server Switcher Bar (Shown whenever an episode has 2+ Drive links) */}
-          {availableServers.length > 1 && (
-            <div className="px-4 sm:px-6 py-2 bg-neutral-900/80 border-b border-neutral-800 flex items-center gap-2 overflow-x-auto text-xs shrink-0">
-              <span className="text-neutral-400 font-bold shrink-0">سيرفرات التشغيل (حسابات Drive):</span>
+          {!isPseudoFullscreen && availableServers.length > 1 && (
+            <div className="px-3 sm:px-6 py-2 bg-neutral-900/80 border-b border-neutral-800 flex items-center gap-2 overflow-x-auto text-xs shrink-0">
+              <span className="text-neutral-400 font-bold shrink-0">سيرفرات التشغيل:</span>
               {availableServers.map((srv, idx) => (
                 <button
                   key={srv.id}
@@ -462,24 +579,77 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
             ref={containerRef}
             onMouseMove={handleActivity}
             onTouchStart={handleActivity}
-            className={`relative w-full shrink-0 bg-black flex items-center justify-center overflow-hidden select-none group ${
-              isFullscreen
-                ? 'h-screen w-screen max-h-none'
-                : isTheaterMode
-                ? 'aspect-video min-h-[220px] sm:min-h-[360px] max-h-[82vh]'
-                : 'aspect-video min-h-[200px] sm:min-h-[320px] max-h-[68vh] sm:max-h-[75vh]'
-            }`}
+            className={
+              isPseudoFullscreen
+                ? 'relative w-full flex-1 h-full bg-black flex items-center justify-center overflow-hidden select-none group'
+                : `relative w-full shrink-0 bg-black flex items-center justify-center overflow-hidden select-none group ${
+                    isNativeFullscreen
+                      ? 'h-screen w-screen max-h-none'
+                      : playerEngine === 'embed' && driveEmbedUrl && !youtubeEmbedUrl && viewportWidth > 0 && viewportWidth < 560
+                      ? 'aspect-[16/10] min-h-[240px] max-h-[70dvh]'
+                      : playerEngine === 'embed' && driveEmbedUrl
+                      ? 'aspect-video sm:h-[460px] md:h-[520px] max-h-[75dvh]'
+                      : isTheaterMode
+                      ? 'aspect-video min-h-[220px] sm:min-h-[360px] max-h-[75dvh] sm:max-h-[82dvh]'
+                      : 'aspect-video min-h-[220px] sm:min-h-[340px] max-h-[65dvh] sm:max-h-[75dvh]'
+                  }`
+            }
           >
+            {/* Floating Fullscreen Top Exit Bar (Centered cleanly away from top-left audio and top-right Drive controls) */}
+            {isPseudoFullscreen && (
+              <div className="absolute top-2.5 left-12 right-28 z-[220] flex items-center justify-center gap-2 pointer-events-none">
+                <button
+                  type="button"
+                  onClick={exitAllFullscreen}
+                  className="pointer-events-auto flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-black/85 hover:bg-black text-white border border-white/25 text-xs font-bold shadow-xl backdrop-blur-md cursor-pointer shrink-0"
+                >
+                  <Minimize className="w-4 h-4 text-rose-400" />
+                  <span>تصغير الشاشة</span>
+                </button>
+
+                {playerEngine === 'native' && hasPlayableSource && (
+                  <button
+                    type="button"
+                    onClick={() => setVideoFitMode((m) => (m === 'contain' ? 'cover' : 'contain'))}
+                    className="pointer-events-auto flex items-center gap-1.5 px-3 py-2 rounded-full bg-black/85 hover:bg-black text-white border border-white/25 text-xs font-bold shadow-xl backdrop-blur-md cursor-pointer shrink-0"
+                  >
+                    <Expand className="w-3.5 h-3.5 text-amber-400" />
+                    <span>{videoFitMode === 'cover' ? 'مقاس أصلي' : 'ملء الشاشة'}</span>
+                  </button>
+                )}
+              </div>
+            )}
+
             {playerEngine === 'embed' && driveEmbedUrl ? (
-              /* Seamless Cloud Stream Engine (Auto-switched if direct video stream is restricted) */
-              <div className="absolute inset-0 w-full h-full">
-                <iframe
-                  src={driveEmbedUrl}
-                  title={episode.title}
-                  className="w-full h-full border-0"
-                  allow="autoplay; fullscreen"
-                  allowFullScreen
-                />
+              /* Fallback Cloud Stream Engine (Scales Google Drive toolbar cleanly on narrow phones in normal & fullscreen modes) */
+              <div dir="ltr" className="w-full h-full flex items-center justify-center bg-black overflow-hidden relative">
+                {!youtubeEmbedUrl && viewportWidth > 0 && viewportWidth < 560 ? (
+                  <div
+                    style={{
+                      width: 560,
+                      height: Math.round((viewportHeight || 260) * (560 / viewportWidth)),
+                      transform: `scale(${viewportWidth / 560})`,
+                      transformOrigin: 'top left',
+                    }}
+                    className="absolute top-0 left-0"
+                  >
+                    <iframe
+                      src={driveEmbedUrl}
+                      title={episode.title}
+                      className="w-full h-full border-0"
+                      allow="autoplay; fullscreen; picture-in-picture"
+                      allowFullScreen
+                    />
+                  </div>
+                ) : (
+                  <iframe
+                    src={driveEmbedUrl}
+                    title={episode.title}
+                    className="w-full h-full border-0"
+                    allow="autoplay; fullscreen; picture-in-picture"
+                    allowFullScreen
+                  />
+                )}
               </div>
             ) : !hasPlayableSource ? (
               /* Coming Soon cinematic banner */
@@ -504,55 +674,79 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
               <>
                 {/* Native Cinema <video> Player */}
                 <video
-                  key={`${streamUrl}-${selectedSubtitleLang}`}
+                  key={streamUrl}
                   ref={videoRef}
                   src={streamUrl || undefined}
                   poster={episode.thumbnail}
-                onTimeUpdate={handleTimeUpdate}
-                onLoadedMetadata={handleLoadedMetadata}
-                onEnded={() => {
-                  setIsPlaying(false);
-                  if (nextEpisode && !nextEpisode.isComingSoon) {
-                    onSelectEpisode(nextEpisode);
-                  }
-                }}
-                onError={() => {
-                  // Try Drive embed fallback for current server first, then failover to next Drive account mirror
-                  if (driveEmbedUrl && playerEngine !== 'embed') {
-                    setPlayerEngine('embed');
-                  } else if (activeServerIdx + 1 < availableServers.length) {
-                    setActiveServerIdx((prev) => prev + 1);
-                    setPlayerEngine('native');
-                  } else {
-                    setNativeFailed(true);
-                  }
-                }}
-                onClick={togglePlay}
-                className="w-full h-full object-contain cursor-pointer"
-                playsInline
-                preload="metadata"
-              >
-                {streamUrl && <source src={streamUrl} type="video/mp4" />}
-                {streamUrl && <source src={streamUrl} type="video/webm" />}
+                  onTimeUpdate={handleTimeUpdate}
+                  onLoadedMetadata={handleLoadedMetadata}
+                  onEnded={() => {
+                    setIsPlaying(false);
+                    if (nextEpisode && !nextEpisode.isComingSoon) {
+                      onSelectEpisode(nextEpisode);
+                    }
+                  }}
+                  onError={() => {
+                    // Try Drive embed fallback for current server first, then failover to next Drive account mirror
+                    if (driveEmbedUrl && playerEngine !== 'embed') {
+                      setPlayerEngine('embed');
+                    } else if (activeServerIdx + 1 < availableServers.length) {
+                      setActiveServerIdx((prev) => prev + 1);
+                      setPlayerEngine('native');
+                    } else {
+                      setNativeFailed(true);
+                    }
+                  }}
+                  onClick={togglePlay}
+                  className={`w-full h-full cursor-pointer transition-all ${
+                    videoFitMode === 'cover' ? 'object-cover' : 'object-contain'
+                  }`}
+                  playsInline
+                  preload="metadata"
+                >
+                  {/* Subtitle tracks */}
+                  {availableSubtitles.map((track) => (
+                    <track
+                      key={track.id}
+                      kind="subtitles"
+                      src={track.src}
+                      srcLang={track.lang}
+                      label={track.label}
+                      default={selectedSubtitleLang === track.lang}
+                    />
+                  ))}
+                </video>
 
-                {/* Subtitle tracks */}
-                {availableSubtitles.map((track) => (
-                  <track
-                    key={track.id}
-                    kind="subtitles"
-                    src={track.src}
-                    srcLang={track.lang}
-                    label={track.label}
-                    default={selectedSubtitleLang === track.lang}
-                  />
-                ))}
-              </video>
+                {/* Playback failure notice with quick Drive embed retry */}
+                {nativeFailed && (
+                  <div className="absolute inset-0 bg-black/85 flex flex-col items-center justify-center p-4 text-center z-20 gap-3">
+                    <p className="text-xs sm:text-sm font-bold text-neutral-200 max-w-md">
+                      تعذر تشغيل البث المباشر في هذا المتصفح. تأكد أن رابط الفيديو في لوحة المشرف مضبوط على «أي شخص لديه الرابط».
+                    </p>
+                    {driveEmbedUrl && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNativeFailed(false);
+                          setPlayerEngine('embed');
+                        }}
+                        className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold cursor-pointer"
+                      >
+                        تشغيل عبر مشغل السحابة البديل
+                      </button>
+                    )}
+                  </div>
+                )}
 
               {/* Subtitle Cinema Overlay Box */}
               {selectedSubtitleLang !== 'off' && currentSubtitleText && (
-                <div className="absolute bottom-20 sm:bottom-24 left-6 right-6 flex justify-center pointer-events-none z-20">
+                <div
+                  className={`absolute left-4 right-4 sm:left-6 sm:right-6 flex justify-center pointer-events-none z-20 transition-all ${
+                    showControls || !isPlaying ? 'bottom-16 sm:bottom-24' : 'bottom-4 sm:bottom-8'
+                  }`}
+                >
                   <div
-                    className="max-w-3xl px-5 py-2 rounded-2xl bg-black/85 text-white text-center text-sm sm:text-lg font-bold border border-white/10 shadow-[0_4px_24px_rgba(0,0,0,0.8)] backdrop-blur-md whitespace-pre-line leading-relaxed tracking-wide text-shadow"
+                    className="max-w-3xl px-3.5 sm:px-5 py-1.5 sm:py-2 rounded-xl sm:rounded-2xl bg-black/85 text-white text-center text-xs sm:text-lg font-bold border border-white/10 shadow-[0_4px_24px_rgba(0,0,0,0.8)] backdrop-blur-md whitespace-pre-line leading-relaxed tracking-wide text-shadow"
                     dir="auto"
                   >
                     {currentSubtitleText}
@@ -563,31 +757,31 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
               {/* Center Play/Pause Ripple Feedback Icon */}
               {playFeedback && (
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30 animate-out fade-out zoom-out duration-500">
-                  <div className="w-20 h-20 rounded-full bg-black/70 text-white flex items-center justify-center border border-white/20 shadow-2xl">
+                  <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-black/70 text-white flex items-center justify-center border border-white/20 shadow-2xl">
                     {playFeedback === 'play' ? (
-                      <Play className="w-10 h-10 fill-white translate-x-1" />
+                      <Play className="w-8 h-8 sm:w-10 sm:h-10 fill-white translate-x-1" />
                     ) : (
-                      <Pause className="w-10 h-10 fill-white" />
+                      <Pause className="w-8 h-8 sm:w-10 sm:h-10 fill-white" />
                     )}
                   </div>
                 </div>
               )}
 
               {/* Big Center Play Button if paused */}
-              {!isPlaying && !playFeedback && (
+              {!isPlaying && !playFeedback && !nativeFailed && (
                 <button
                   onClick={togglePlay}
                   className="absolute inset-0 flex items-center justify-center bg-black/35 cursor-pointer z-10"
                 >
-                  <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-rose-600/90 text-white flex items-center justify-center shadow-2xl hover:scale-110 transition-transform">
-                    <Play className="w-8 h-8 sm:w-10 sm:h-10 fill-white translate-x-0.5" />
+                  <div className="w-14 h-14 sm:w-20 sm:h-20 rounded-full bg-rose-600/90 text-white flex items-center justify-center shadow-2xl hover:scale-110 transition-transform">
+                    <Play className="w-7 h-7 sm:w-10 sm:h-10 fill-white translate-x-0.5" />
                   </div>
                 </button>
               )}
 
               {/* Custom Cinema Controls Bar (Auto-hiding) */}
               <div
-                className={`absolute bottom-0 left-0 right-0 p-3 sm:p-5 bg-gradient-to-t from-black/95 via-black/80 to-transparent flex flex-col gap-2.5 transition-opacity duration-300 z-30 ${
+                className={`absolute bottom-0 left-0 right-0 p-2.5 sm:p-5 bg-gradient-to-t from-black/95 via-black/80 to-transparent flex flex-col gap-1.5 sm:gap-2.5 transition-opacity duration-300 z-30 ${
                   showControls || !isPlaying
                     ? 'opacity-100 pointer-events-auto'
                     : 'opacity-0 pointer-events-none'
@@ -606,49 +800,53 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
                 </div>
 
                 {/* Main Controls Row */}
-                <div className="flex items-center justify-between text-xs text-white">
+                <div className="flex items-center justify-between text-xs text-white gap-1">
                   {/* Left Controls: Play, 10s skips, Volume, Timers */}
-                  <div className="flex items-center gap-2 sm:gap-4">
+                  <div className="flex items-center gap-1 sm:gap-3 min-w-0">
                     <button
+                      type="button"
                       onClick={togglePlay}
-                      className="p-1.5 sm:p-2 rounded-xl hover:bg-white/10 transition-colors cursor-pointer"
+                      className="p-1.5 sm:p-2 rounded-xl hover:bg-white/10 transition-colors cursor-pointer shrink-0"
                       title={isPlaying ? 'إيقاف مؤقت (Space)' : 'تشغيل (Space)'}
                     >
                       {isPlaying ? (
-                        <Pause className="w-5 h-5" />
+                        <Pause className="w-4 h-4 sm:w-5 sm:h-5" />
                       ) : (
-                        <Play className="w-5 h-5 fill-white" />
+                        <Play className="w-4 h-4 sm:w-5 sm:h-5 fill-white" />
                       )}
                     </button>
 
                     {/* 10s Rewind / Fast-forward */}
                     <button
+                      type="button"
                       onClick={() => skipSeconds(-10)}
-                      className="p-1.5 rounded-lg hover:bg-white/10 text-neutral-300 hover:text-white transition-colors cursor-pointer"
+                      className="p-1 sm:p-1.5 rounded-lg hover:bg-white/10 text-neutral-300 hover:text-white transition-colors cursor-pointer shrink-0"
                       title="ترجيع 10 ثواني (سهم يسار)"
                     >
-                      <RotateCcw className="w-4 h-4" />
+                      <RotateCcw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                     </button>
 
                     <button
+                      type="button"
                       onClick={() => skipSeconds(10)}
-                      className="p-1.5 rounded-lg hover:bg-white/10 text-neutral-300 hover:text-white transition-colors cursor-pointer"
+                      className="p-1 sm:p-1.5 rounded-lg hover:bg-white/10 text-neutral-300 hover:text-white transition-colors cursor-pointer shrink-0"
                       title="تقديم 10 ثواني (سهم يمين)"
                     >
-                      <RotateCw className="w-4 h-4" />
+                      <RotateCw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                     </button>
 
                     {/* Volume control */}
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1 shrink-0">
                       <button
+                        type="button"
                         onClick={toggleMute}
-                        className="p-1.5 rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
+                        className="p-1 sm:p-1.5 rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
                         title={isMuted ? 'إلغاء الكتم (M)' : 'كتم الصوت (M)'}
                       >
                         {isMuted ? (
-                          <VolumeX className="w-4 h-4 text-rose-500" />
+                          <VolumeX className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-rose-500" />
                         ) : (
-                          <Volume2 className="w-4 h-4" />
+                          <Volume2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                         )}
                       </button>
                       <input
@@ -663,17 +861,17 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
                     </div>
 
                     {/* Timers */}
-                    <div className="text-[11px] font-mono text-neutral-300 tabular-nums">
-                      {formatTime(currentTime)}{' '}
-                      <span className="text-neutral-500">/</span> {formatTime(duration)}
+                    <div className="text-[10px] sm:text-[11px] font-mono text-neutral-300 tabular-nums truncate">
+                      {formatTime(currentTime)} <span className="text-neutral-500">/</span> {formatTime(duration)}
                     </div>
                   </div>
 
-                  {/* Right Controls: Subtitles, Speed, Prev/Next, Fullscreen */}
-                  <div className="flex items-center gap-2 sm:gap-3 relative">
+                  {/* Right Controls: Subtitles, Speed, Zoom/Fill, Fullscreen */}
+                  <div className="flex items-center gap-1 sm:gap-2.5 relative shrink-0">
                     {/* Subtitle Selector */}
                     <div className="relative">
                       <button
+                        type="button"
                         onClick={() => {
                           setShowSubtitleMenu(!showSubtitleMenu);
                           setShowSpeedMenu(false);
@@ -685,18 +883,19 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
                         }`}
                         title="الترجمة (C)"
                       >
-                        <Subtitles className="w-4 h-4" />
+                        <Subtitles className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                         <span className="text-[11px] font-bold uppercase hidden md:inline">
                           {selectedSubtitleLang === 'off' ? 'ترجمة' : selectedSubtitleLang}
                         </span>
                       </button>
 
                       {showSubtitleMenu && (
-                        <div className="absolute bottom-12 left-0 w-48 bg-neutral-900 border border-neutral-700/80 rounded-2xl shadow-2xl p-2 z-50 text-right animate-in fade-in">
+                        <div className="absolute bottom-11 left-0 w-44 sm:w-48 bg-neutral-900 border border-neutral-700/80 rounded-2xl shadow-2xl p-2 z-50 text-right animate-in fade-in">
                           <div className="text-[10px] font-bold text-neutral-400 px-2 py-1 border-b border-neutral-800 mb-1">
                             خيارات الترجمة (VTT)
                           </div>
                           <button
+                            type="button"
                             onClick={() => applySubtitleSelection('off')}
                             className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs transition-colors cursor-pointer ${
                               selectedSubtitleLang === 'off'
@@ -710,6 +909,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
 
                           {availableSubtitles.map((track) => (
                             <button
+                              type="button"
                               key={track.id}
                               onClick={() => applySubtitleSelection(track.lang)}
                               className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs transition-colors cursor-pointer ${
@@ -729,20 +929,22 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
                     {/* Speed Selector */}
                     <div className="relative">
                       <button
+                        type="button"
                         onClick={() => {
                           setShowSpeedMenu(!showSpeedMenu);
                           setShowSubtitleMenu(false);
                         }}
-                        className="p-1.5 sm:px-2 rounded-xl bg-black/50 hover:bg-neutral-800 text-neutral-300 border border-white/10 text-xs font-mono transition-colors cursor-pointer"
+                        className="px-1.5 py-1 sm:px-2 sm:py-1.5 rounded-xl bg-black/50 hover:bg-neutral-800 text-neutral-300 border border-white/10 text-[10px] sm:text-xs font-mono transition-colors cursor-pointer"
                         title="سرعة التشغيل"
                       >
                         {playbackSpeed}x
                       </button>
 
                       {showSpeedMenu && (
-                        <div className="absolute bottom-12 left-0 w-28 bg-neutral-900 border border-neutral-700/80 rounded-2xl shadow-2xl p-1.5 z-50 animate-in fade-in">
+                        <div className="absolute bottom-11 left-0 w-24 sm:w-28 bg-neutral-900 border border-neutral-700/80 rounded-2xl shadow-2xl p-1.5 z-50 animate-in fade-in">
                           {[0.75, 1, 1.25, 1.5, 2].map((spd) => (
                             <button
+                              type="button"
                               key={spd}
                               onClick={() => changePlaybackSpeed(spd)}
                               className={`w-full text-center py-1 rounded-lg text-xs font-mono transition-colors cursor-pointer ${
@@ -758,14 +960,29 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
                       )}
                     </div>
 
+                    {/* Zoom / Fill Screen Fit Toggle */}
+                    <button
+                      type="button"
+                      onClick={() => setVideoFitMode((m) => (m === 'contain' ? 'cover' : 'contain'))}
+                      className={`p-1.5 rounded-xl border transition-colors cursor-pointer ${
+                        videoFitMode === 'cover'
+                          ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                          : 'bg-black/50 hover:bg-neutral-800 text-neutral-300 border-white/10'
+                      }`}
+                      title={videoFitMode === 'cover' ? 'إرجاع المقاس الأصلي' : 'تكبير الصورة لملء الإطار'}
+                    >
+                      <Expand className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                    </button>
+
                     {/* Fullscreen Button */}
                     <button
+                      type="button"
                       onClick={toggleFullscreen}
                       className="p-1.5 sm:p-2 rounded-xl hover:bg-white/10 transition-colors cursor-pointer"
-                      title="شاشة كاملة (F)"
+                      title={isFullscreen ? 'تصغير الشاشة (F)' : 'شاشة كاملة (F)'}
                     >
                       {isFullscreen ? (
-                        <Minimize className="w-4 h-4 sm:w-5 sm:h-5" />
+                        <Minimize className="w-4 h-4 sm:w-5 sm:h-5 text-rose-400" />
                       ) : (
                         <Maximize className="w-4 h-4 sm:w-5 sm:h-5" />
                       )}
@@ -778,7 +995,11 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
         </div>
 
           {/* Pure Viewer Details & Episode Selection Panel */}
-          <div className="p-4 sm:p-6 bg-neutral-950 border-t border-neutral-900 space-y-6 shrink-0">
+          <div
+            className={`${
+              isPseudoFullscreen ? 'hidden' : 'block'
+            } p-4 sm:p-6 bg-neutral-950 border-t border-neutral-900 space-y-6 shrink-0`}
+          >
           {/* Episode Title & Description */}
           <div className="flex flex-col lg:flex-row items-start justify-between gap-4">
             <div className="space-y-2 flex-1">
@@ -890,7 +1111,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
                       <div className="text-[10px] font-mono font-bold text-rose-400 mb-0.5">
                         الحلقة {ep.episodeNumber}
                       </div>
-                      <div className="text-[11px] font-bold text-neutral-200 truncate group-hover:text-white">
+                      <div className="text-[11px] font-bold text-neutral-200 line-clamp-2 leading-snug group-hover:text-white">
                         {ep.title}
                       </div>
                     </div>

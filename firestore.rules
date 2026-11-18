@@ -132,7 +132,7 @@ service cloud.firestore {
         && data.category is string
         && data.category.size() >= 1
         && data.category.size() <= 20
-        && (data.category == 'anime' || data.category == 'movie' || data.category == 'dubbed')
+        && (data.category == 'anime' || data.category == 'movie' || data.category == 'dubbed' || data.category == 'tv')
         && data.title is string
         && data.title.size() >= 1
         && data.title.size() <= 200
@@ -325,6 +325,126 @@ service cloud.firestore {
       allow delete: if isAdmin() && settingId == 'accessGate';
     }
 
+    // Validation Blueprint: CatalogOverride
+    function isValidCatalogOverride(data, seriesId) {
+      return data.keys().hasAll([
+          'seriesId',
+          'isDeleted',
+          'title',
+          'originalTitle',
+          'coverImage',
+          'bannerImage',
+          'genres',
+          'dubStudio',
+          'rating',
+          'synopsis',
+          'isPublic',
+          'updatedByUid',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'seriesId',
+          'isDeleted',
+          'title',
+          'originalTitle',
+          'coverImage',
+          'bannerImage',
+          'genres',
+          'dubStudio',
+          'rating',
+          'synopsis',
+          'isPublic',
+          'updatedByUid',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.seriesId is string
+        && data.seriesId.size() >= 1
+        && data.seriesId.size() <= 128
+        && data.seriesId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.seriesId == seriesId
+        && data.isDeleted is bool
+        && data.title is string
+        && data.title.size() <= 200
+        && data.originalTitle is string
+        && data.originalTitle.size() <= 200
+        && data.coverImage is string
+        && data.coverImage.size() <= 400000
+        && data.bannerImage is string
+        && data.bannerImage.size() <= 400000
+        && data.genres is list
+        && data.genres.size() <= 8
+        && (data.genres.size() == 0 || data.genres[0] is string)
+        && data.dubStudio is string
+        && data.dubStudio.size() <= 120
+        && data.rating is number
+        && data.rating >= 0
+        && data.rating <= 10
+        && data.synopsis is string
+        && data.synopsis.size() <= 4000
+        && data.isPublic is bool
+        && data.isPublic == true
+        && data.updatedByUid is string
+        && data.updatedByUid.size() >= 1
+        && data.updatedByUid.size() <= 128
+        && data.updatedByUid == request.auth.uid
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: SeasonOverride
+    function isValidSeasonOverride(data, overrideId) {
+      return data.keys().hasAll([
+          'overrideId',
+          'seriesId',
+          'seasonId',
+          'seasonTitle',
+          'episodes',
+          'isPublic',
+          'updatedByUid',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'overrideId',
+          'seriesId',
+          'seasonId',
+          'seasonTitle',
+          'episodes',
+          'isPublic',
+          'updatedByUid',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.overrideId is string
+        && data.overrideId.size() >= 1
+        && data.overrideId.size() <= 128
+        && data.overrideId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.overrideId == overrideId
+        && data.seriesId is string
+        && data.seriesId.size() >= 1
+        && data.seriesId.size() <= 128
+        && data.seriesId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.seasonId is string
+        && data.seasonId.size() >= 1
+        && data.seasonId.size() <= 128
+        && data.seasonId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.seasonTitle is string
+        && data.seasonTitle.size() <= 200
+        && data.episodes is list
+        && data.episodes.size() <= 250
+        && (data.episodes.size() == 0 || data.episodes[0] is map)
+        && data.isPublic is bool
+        && data.isPublic == true
+        && data.updatedByUid is string
+        && data.updatedByUid.size() >= 1
+        && data.updatedByUid.size() <= 128
+        && data.updatedByUid == request.auth.uid
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
     // Admin registry (admin-only read/write, no self-promotion)
     match /admins/{userId} {
       allow get: if isAdmin() && isValidId(userId);
@@ -342,6 +462,67 @@ service cloud.firestore {
         && incoming().diff(existing()).affectedKeys().hasOnly(['role']);
 
       allow delete: if isAdmin() && isValidId(userId) && userId != request.auth.uid;
+    }
+
+    // Catalog metadata overrides & soft-deletes (readable publicly, writable ONLY by verified admins)
+    match /catalogOverrides/{seriesId} {
+      allow get: if isValidId(seriesId) && (isAdmin() || (resource != null && existing().isPublic == true));
+      allow list: if resource.data.isPublic == true;
+
+      allow create: if isAdmin()
+        && isValidId(seriesId)
+        && isValidCatalogOverride(incoming(), seriesId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isAdmin()
+        && isValidCatalogOverride(incoming(), seriesId)
+        && isValidId(seriesId)
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'isDeleted',
+          'title',
+          'originalTitle',
+          'coverImage',
+          'bannerImage',
+          'genres',
+          'dubStudio',
+          'rating',
+          'synopsis',
+          'updatedByUid',
+          'updatedAt'
+        ]);
+
+      allow delete: if isAdmin() && isValidId(seriesId);
+    }
+
+    // Season episode overrides (merged/split/renamed/reordered episodes per season)
+    match /seasonOverrides/{overrideId} {
+      allow get: if isValidId(overrideId) && (isAdmin() || (resource != null && existing().isPublic == true));
+      allow list: if resource.data.isPublic == true;
+
+      allow create: if isAdmin()
+        && isValidId(overrideId)
+        && isValidSeasonOverride(incoming(), overrideId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isAdmin()
+        && isValidSeasonOverride(incoming(), overrideId)
+        && isValidId(overrideId)
+        && incoming().seriesId == existing().seriesId
+        && incoming().seasonId == existing().seasonId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'seasonTitle',
+          'episodes',
+          'updatedByUid',
+          'updatedAt'
+        ]);
+
+      allow delete: if isAdmin() && isValidId(overrideId);
     }
   }
 }

@@ -9,6 +9,7 @@ import {
   db,
   auth,
   isVerifiedAdminUser,
+  isFirestoreOfflineError,
   OperationType,
   handleFirestoreError,
 } from '../firebase.ts';
@@ -46,6 +47,9 @@ export function getDefaultAccessGateConfig(): AccessGateConfig {
 }
 
 export async function fetchAccessGateConfig(): Promise<AccessGateConfig> {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return getDefaultAccessGateConfig();
+  }
   const docPath = 'siteSettings/accessGate';
   const ref = doc(db, 'siteSettings', 'accessGate');
   let timerId: ReturnType<typeof setTimeout> | undefined;
@@ -79,6 +83,10 @@ export async function fetchAccessGateConfig(): Promise<AccessGateConfig> {
     };
   } catch (error) {
     if (timerId) clearTimeout(timerId);
+    if (isFirestoreOfflineError(error)) {
+      console.warn('Access gate check fell back to defaults while offline.');
+      return getDefaultAccessGateConfig();
+    }
     handleFirestoreError(error, OperationType.GET, docPath);
   }
 }

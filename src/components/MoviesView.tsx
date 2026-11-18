@@ -10,11 +10,16 @@ import {
   Film,
   Layers,
   ChevronLeft,
-  Plus
+  Plus,
+  Search,
 } from 'lucide-react';
 import { MOVIES_WORKS, DubSeries, DubEpisode } from '../data/mockData';
 import { getCustomEpisodeSource, SOURCES_UPDATED_EVENT } from '../utils/videoSource';
-import { getCustomSeriesByCategory, CUSTOM_WORKS_UPDATED_EVENT } from '../utils/customWorks';
+import { CUSTOM_WORKS_UPDATED_EVENT } from '../utils/customWorks';
+import {
+  CATALOG_OVERRIDES_UPDATED_EVENT,
+  getEffectiveWorksByCategory,
+} from '../utils/catalogOverrides';
 
 interface MoviesViewProps {
   onSelectSeries: (series: DubSeries) => void;
@@ -29,28 +34,68 @@ export const MoviesView: React.FC<MoviesViewProps> = ({
   onPlayEpisode,
   onOpenAdmin,
   isOwnerAdmin = false,
-  onOpenCreateWork,
 }) => {
-  const [selectedMovieId, setSelectedMovieId] = useState<string>(MOVIES_WORKS[0].id);
+  const [selectedMovieId, setSelectedMovieId] = useState<string>(MOVIES_WORKS[0]?.id || '');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [selectedGenre, setSelectedGenre] = useState<string>('all');
   const [, setVersionTick] = useState<number>(0);
 
   useEffect(() => {
     const onUpdate = () => setVersionTick((v) => v + 1);
     window.addEventListener(SOURCES_UPDATED_EVENT, onUpdate);
     window.addEventListener(CUSTOM_WORKS_UPDATED_EVENT, onUpdate);
+    window.addEventListener(CATALOG_OVERRIDES_UPDATED_EVENT, onUpdate);
     return () => {
       window.removeEventListener(SOURCES_UPDATED_EVENT, onUpdate);
       window.removeEventListener(CUSTOM_WORKS_UPDATED_EVENT, onUpdate);
+      window.removeEventListener(CATALOG_OVERRIDES_UPDATED_EVENT, onUpdate);
     };
   }, []);
 
-  const allMovieWorks = [...MOVIES_WORKS, ...getCustomSeriesByCategory('movie')];
+  const allMovieWorks = getEffectiveWorksByCategory('movie');
+
+  if (allMovieWorks.length === 0) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 text-center space-y-4" dir="rtl">
+        <Film className="w-12 h-12 text-amber-500 mx-auto opacity-80" />
+        <h2 className="text-2xl font-black text-white">لا توجد أفلام معروضة حالياً</h2>
+        <p className="text-sm text-neutral-400">
+          يمكن للمشرف إضافة فيلم جديد أو استعادة الأفلام المحذوفة من لوحة تحكم المشرف.
+        </p>
+        {isOwnerAdmin && (
+          <button
+            onClick={onOpenAdmin}
+            className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-neutral-950 rounded-xl text-xs font-black inline-flex items-center gap-2 cursor-pointer"
+          >
+            <ShieldCheck className="w-4 h-4" />
+            <span>فتح لوحة المشرف</span>
+          </button>
+        )}
+      </div>
+    );
+  }
 
   const flagshipMovie =
     allMovieWorks.find((m) => m.id === selectedMovieId) || allMovieWorks[0];
   const movieEpisode = flagshipMovie.episodes[0] || flagshipMovie.seasons[0]?.episodes[0];
-  const customConfig = getCustomEpisodeSource(movieEpisode.id);
-  const hasDriveLink = Boolean(customConfig?.driveLink);
+  const customConfig = movieEpisode ? getCustomEpisodeSource(movieEpisode.id) : null;
+  const hasDriveLink = Boolean(customConfig?.driveLink || customConfig?.videoUrl);
+
+  const movieGenres = Array.from(
+    new Set(allMovieWorks.flatMap((m) => m.genres || []).filter(Boolean))
+  );
+
+  const filteredMovies = allMovieWorks.filter((movie) => {
+    const q = searchQuery.trim().toLowerCase();
+    const matchesSearch =
+      !q ||
+      movie.title.toLowerCase().includes(q) ||
+      movie.originalTitle.toLowerCase().includes(q) ||
+      movie.genres.some((g) => g.toLowerCase().includes(q));
+    const matchesGenre =
+      selectedGenre === 'all' || movie.genres.some((g) => g.includes(selectedGenre));
+    return matchesSearch && matchesGenre;
+  });
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-12" dir="rtl">
@@ -72,26 +117,60 @@ export const MoviesView: React.FC<MoviesViewProps> = ({
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
-          {isOwnerAdmin && onOpenCreateWork && (
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+          <div className="relative w-full sm:w-64">
+            <Search className="w-4 h-4 text-neutral-500 absolute top-1/2 right-3 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="ابحث عن فيلم أو تصنيف..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full bg-neutral-900 border border-neutral-800 text-white text-xs rounded-xl py-2.5 pr-9 pl-3 focus:outline-none focus:border-amber-500 transition-colors"
+            />
+          </div>
+
+          {isOwnerAdmin && (
             <button
-              onClick={onOpenCreateWork}
-              className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-neutral-950 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-lg shadow-amber-950/60"
+              onClick={onOpenAdmin}
+              className="px-3.5 py-2.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-800 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
             >
-              <Plus className="w-4 h-4" />
-              <span>إضافة فيلم جديد (للمالك)</span>
+              <ShieldCheck className="w-4 h-4 text-amber-500" />
+              <span>إدارة الأفلام والروابط (لوحة المشرف)</span>
             </button>
           )}
-
-          <button
-            onClick={onOpenAdmin}
-            className="px-3.5 py-2.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-800 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-          >
-            <ShieldCheck className="w-4 h-4 text-amber-500" />
-            <span>إدارة روابط الأفلام (المشرف)</span>
-          </button>
         </div>
       </div>
+
+      {/* Movie Genre Filters */}
+      {movieGenres.length > 0 && (
+        <div className="flex items-center gap-2 overflow-x-auto pb-1">
+          <button
+            type="button"
+            onClick={() => setSelectedGenre('all')}
+            className={`min-h-[36px] px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap cursor-pointer border transition-colors ${
+              selectedGenre === 'all'
+                ? 'bg-amber-500 text-neutral-950 border-amber-400 font-black'
+                : 'bg-neutral-900 text-neutral-400 hover:text-white border-neutral-800'
+            }`}
+          >
+            جميع التصنيفات
+          </button>
+          {movieGenres.map((genre) => (
+            <button
+              key={genre}
+              type="button"
+              onClick={() => setSelectedGenre(selectedGenre === genre ? 'all' : genre)}
+              className={`min-h-[36px] px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap cursor-pointer border transition-colors ${
+                selectedGenre === genre
+                  ? 'bg-amber-500 text-neutral-950 border-amber-400 font-black'
+                  : 'bg-neutral-900 text-neutral-300 hover:text-white border-neutral-800'
+              }`}
+            >
+              {genre}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Movie Switcher Bar */}
       <div className="flex items-center gap-3 overflow-x-auto pb-1">
@@ -107,9 +186,11 @@ export const MoviesView: React.FC<MoviesViewProps> = ({
           >
             <Film className="w-4 h-4" />
             <span>{m.title}</span>
-            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-black/25">
-              {m.originalTitle.split('(')[0].trim()}
-            </span>
+            {m.originalTitle && m.originalTitle.trim() !== m.title.trim() && (
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-black/25">
+                {m.originalTitle.split('(')[0].trim()}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -133,7 +214,7 @@ export const MoviesView: React.FC<MoviesViewProps> = ({
             <div className="absolute inset-0 bg-gradient-to-t from-neutral-950/80 via-transparent to-transparent" />
 
             <div className="absolute top-3 right-3 bg-amber-500 text-neutral-950 font-mono text-[10px] font-black px-2.5 py-0.5 rounded-full shadow">
-              الفيلم السينمائي الأول
+              {flagshipMovie.id === MOVIES_WORKS[0].id ? 'الفيلم السينمائي الأول' : 'فيلم سينمائي حصري'}
             </div>
 
             <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40">
@@ -143,7 +224,7 @@ export const MoviesView: React.FC<MoviesViewProps> = ({
             </div>
 
             <div className="absolute bottom-3 left-3 text-xs font-mono font-bold text-white bg-black/80 px-2 py-0.5 rounded">
-              {movieEpisode.duration}
+              {movieEpisode?.duration || 'فيلم كامل'}
             </div>
           </div>
 
@@ -159,7 +240,7 @@ export const MoviesView: React.FC<MoviesViewProps> = ({
                   <span>{flagshipMovie.rating}</span>
                 </span>
                 <span className="text-xs font-mono px-2.5 py-0.5 rounded-full bg-neutral-800 text-neutral-300">
-                  مدة العرض: 02:20:00
+                  {hasDriveLink ? 'متاح للمشاهدة HD' : `المدة: ${movieEpisode?.duration || 'فيلم كامل'}`}
                 </span>
                 <span className="text-xs text-neutral-400 font-mono">
                   {flagshipMovie.dubStudio}
@@ -169,28 +250,32 @@ export const MoviesView: React.FC<MoviesViewProps> = ({
               <h2 className="text-2xl sm:text-4xl font-black text-white tracking-tight mb-1">
                 {flagshipMovie.title}
               </h2>
-              <p className="text-xs sm:text-sm font-mono text-amber-400/90 mb-3" dir="ltr">
-                {flagshipMovie.originalTitle}
-              </p>
+              {flagshipMovie.originalTitle && flagshipMovie.originalTitle.trim() !== flagshipMovie.title.trim() && (
+                <p className="text-xs sm:text-sm font-mono text-amber-400/90 mb-3" dir="ltr">
+                  {flagshipMovie.originalTitle}
+                </p>
+              )}
 
               <p className="text-xs sm:text-sm text-neutral-300 leading-relaxed max-w-3xl mb-4">
                 {flagshipMovie.synopsis}
               </p>
 
               {/* Cast */}
-              <div className="space-y-1.5 pt-2">
-                <div className="text-xs font-bold text-neutral-400">الشخصيات والأداء الصوتي:</div>
-                <div className="flex flex-wrap gap-1.5">
-                  {movieEpisode.voiceActors.map((actor, idx) => (
-                    <span
-                      key={idx}
-                      className="px-2.5 py-1 rounded-lg bg-neutral-800 text-neutral-200 border border-neutral-700 text-xs font-medium"
-                    >
-                      {actor}
-                    </span>
-                  ))}
+              {movieEpisode?.voiceActors && movieEpisode.voiceActors.length > 0 && (
+                <div className="space-y-1.5 pt-2">
+                  <div className="text-xs font-bold text-neutral-400">الشخصيات والأداء الصوتي:</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {movieEpisode.voiceActors.map((actor, idx) => (
+                      <span
+                        key={idx}
+                        className="px-2.5 py-1 rounded-lg bg-neutral-800 text-neutral-200 border border-neutral-700 text-xs font-medium"
+                      >
+                        {actor}
+                      </span>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
 
             {/* Actions */}
@@ -223,12 +308,12 @@ export const MoviesView: React.FC<MoviesViewProps> = ({
             <span>قائمة الأفلام السينمائية</span>
           </h3>
           <span className="text-xs font-mono text-neutral-400">
-            {allMovieWorks.length} فيلم متاح
+            {filteredMovies.length} فيلم متاح
           </span>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
-          {allMovieWorks.map((movie) => {
+          {filteredMovies.map((movie) => {
             const ep = movie.episodes[0] || movie.seasons[0]?.episodes[0];
             return (
               <div

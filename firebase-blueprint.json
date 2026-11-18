@@ -84,7 +84,7 @@
         "category": {
           "type": "string",
           "description": "Target catalog section.",
-          "enum": ["anime", "movie", "dubbed"],
+          "enum": ["anime", "movie", "dubbed", "tv"],
           "minLength": 1,
           "maxLength": 20
         },
@@ -261,6 +261,163 @@
         }
       },
       "required": ["uid", "role", "createdAt"]
+    },
+    "CatalogOverride": {
+      "title": "CatalogOverride",
+      "description": "Admin-managed metadata override or soft-delete marker for built-in series and movies.",
+      "type": "object",
+      "properties": {
+        "seriesId": {
+          "type": "string",
+          "description": "Unique identifier of the series or movie.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "isDeleted": {
+          "type": "boolean",
+          "description": "When true, hides this built-in work from public views."
+        },
+        "title": {
+          "type": "string",
+          "description": "Optional overridden Arabic title.",
+          "minLength": 0,
+          "maxLength": 200
+        },
+        "originalTitle": {
+          "type": "string",
+          "description": "Optional overridden original/English title.",
+          "minLength": 0,
+          "maxLength": 200
+        },
+        "coverImage": {
+          "type": "string",
+          "description": "Optional overridden cover image URL or compressed JPEG data URI.",
+          "minLength": 0,
+          "maxLength": 400000
+        },
+        "bannerImage": {
+          "type": "string",
+          "description": "Optional overridden banner image URL or compressed JPEG data URI.",
+          "minLength": 0,
+          "maxLength": 400000
+        },
+        "genres": {
+          "type": "array",
+          "description": "Optional overridden list of genres (max 8)."
+        },
+        "dubStudio": {
+          "type": "string",
+          "description": "Optional overridden studio label.",
+          "minLength": 0,
+          "maxLength": 120
+        },
+        "rating": {
+          "type": "number",
+          "description": "Overridden rating from 0 to 10."
+        },
+        "synopsis": {
+          "type": "string",
+          "description": "Optional overridden story description.",
+          "minLength": 0,
+          "maxLength": 4000
+        },
+        "isPublic": {
+          "type": "boolean",
+          "description": "Explicit visibility flag allowing clients to read catalog configuration."
+        },
+        "updatedByUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "seriesId",
+        "isDeleted",
+        "title",
+        "originalTitle",
+        "coverImage",
+        "bannerImage",
+        "genres",
+        "dubStudio",
+        "rating",
+        "synopsis",
+        "isPublic",
+        "updatedByUid",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "SeasonOverride": {
+      "title": "SeasonOverride",
+      "description": "Admin-customized episode list for a specific series season (supports merged, split, renamed, added, reordered, and deleted episodes).",
+      "type": "object",
+      "properties": {
+        "overrideId": {
+          "type": "string",
+          "description": "Deterministic document key combining seriesId and seasonId.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "seriesId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "seasonId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "seasonTitle": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 200
+        },
+        "episodes": {
+          "type": "array",
+          "description": "Ordered list (max 250) of customized episode objects."
+        },
+        "isPublic": {
+          "type": "boolean"
+        },
+        "updatedByUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "overrideId",
+        "seriesId",
+        "seasonId",
+        "seasonTitle",
+        "episodes",
+        "isPublic",
+        "updatedByUid",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -275,6 +432,18 @@
         "$ref": "#/entities/CustomWork"
       },
       "description": "Stores admin-added anime, movies, and dubbed series metadata."
+    },
+    "/catalogOverrides/{seriesId}": {
+      "schema": {
+        "$ref": "#/entities/CatalogOverride"
+      },
+      "description": "Stores admin metadata edits and soft-delete flags for built-in series and movies."
+    },
+    "/seasonOverrides/{overrideId}": {
+      "schema": {
+        "$ref": "#/entities/SeasonOverride"
+      },
+      "description": "Stores customized episode lists (merged/split/edited/reordered) per series season."
     },
     "/siteSettings/{settingId}": {
       "schema": {

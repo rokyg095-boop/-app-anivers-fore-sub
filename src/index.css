@@ -7,6 +7,20 @@
   }
 }
 
+/* Style-specific surface tuning (preserves contrast across dark & warm paper themes) */
+[data-site-style="sakura-light"] main h2,
+[data-site-style="sakura-light"] main h1 {
+  color: #141418;
+}
+
+[data-site-style="sakura-light"] main section > div > div > button {
+  color: #40404a;
+}
+
+[data-site-style="sakura-light"] main section > div > div > button:hover {
+  color: #141418;
+}
+
 /* Custom smooth scrollbar for comic strip and horizontal lists */
 ::-webkit-scrollbar {
   width: 6px;

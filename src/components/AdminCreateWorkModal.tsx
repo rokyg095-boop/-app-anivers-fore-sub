@@ -14,16 +14,39 @@ import {
   Volume2,
   AlertCircle,
   Save,
+  Cloud,
+  Clapperboard,
 } from 'lucide-react';
 import {
   CustomWorkCategory,
   CustomWorkRecord,
   compressImageFileToDataUrl,
+  formatCloudErrorMessage,
   saveCustomWorkToCloud,
   deleteCustomWorkFromCloud,
   getCustomWorkRecords,
   CUSTOM_WORKS_UPDATED_EVENT,
 } from '../utils/customWorks.ts';
+import {
+  DEFAULT_SUBTITLE_TRACKS,
+  extractDriveFileId,
+  getCustomEpisodeSource,
+  normalizeDriveDirectUrl,
+  saveCustomEpisodeSource,
+} from '../utils/videoSource.ts';
+import {
+  ADMIN_EMAIL,
+  isVerifiedAdminUser,
+  signInWithGoogleAdmin,
+  subscribeAuthState,
+} from '../firebase.ts';
+import {
+  fetchTmdbEnrichmentForWork,
+  saveTmdbWorkMapping,
+  searchTmdbWorks,
+  TmdbSearchResult,
+} from '../utils/tmdbMetadata.ts';
+import type { User } from 'firebase/auth';
 
 interface AdminCreateWorkModalProps {
   isOpen: boolean;
@@ -49,10 +72,16 @@ const CATEGORY_INFO: Record<
     icon: <Film className="w-4 h-4 text-amber-400" />,
   },
   dubbed: {
-    label: 'قسم الأعمال المدبلجة',
+    label: 'قسم الأنميشن والكرتون',
     buttonText: 'نشر المسلسل في القسم',
     badgeClass: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
     icon: <Volume2 className="w-4 h-4 text-emerald-400" />,
+  },
+  tv: {
+    label: 'المسلسلات التلفزيونية',
+    buttonText: 'نشر المسلسل التلفزيوني في القسم',
+    badgeClass: 'bg-sky-500/20 text-sky-300 border-sky-500/30',
+    icon: <Clapperboard className="w-4 h-4 text-sky-400" />,
   },
 };
 
@@ -70,6 +99,7 @@ export const AdminCreateWorkModal: React.FC<AdminCreateWorkModalProps> = ({
   const [synopsis, setSynopsis] = useState<string>('');
   const [genresText, setGenresText] = useState<string>('مغامرات، أكشن');
   const [dubStudio, setDubStudio] = useState<string>('');
+  const [videoLink, setVideoLink] = useState<string>('');
   const [seasonsCount, setSeasonsCount] = useState<number>(1);
   const [episodesCount, setEpisodesCount] = useState<number>(12);
   const [rating, setRating] = useState<number>(9.2);
@@ -77,9 +107,24 @@ export const AdminCreateWorkModal: React.FC<AdminCreateWorkModalProps> = ({
   const [imageProcessing, setImageProcessing] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [savedWork, setSavedWork] = useState<CustomWorkRecord | null>(null);
+  const [savedWorkHasLink, setSavedWorkHasLink] = useState<boolean>(false);
   const [existingList, setExistingList] = useState<CustomWorkRecord[]>([]);
+  const [authUser, setAuthUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState<boolean>(false);
+  const [tmdbQuery, setTmdbQuery] = useState<string>('');
+  const [tmdbSearching, setTmdbSearching] = useState<boolean>(false);
+  const [tmdbResults, setTmdbResults] = useState<TmdbSearchResult[]>([]);
+  const [selectedTmdbMatch, setSelectedTmdbMatch] = useState<TmdbSearchResult | null>(null);
 
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const modalBodyRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const unsub = subscribeAuthState((user) => {
+      setAuthUser(user);
+    });
+    return () => unsub();
+  }, []);
 
   useEffect(() => {
     if (isOpen) {
@@ -100,6 +145,29 @@ export const AdminCreateWorkModal: React.FC<AdminCreateWorkModalProps> = ({
 
   if (!isOpen) return null;
 
+  const isOwnerVerified = isVerifiedAdminUser(authUser);
+
+  const handleOwnerLogin = async () => {
+    setAuthLoading(true);
+    setErrorMsg(null);
+    try {
+      const user = await signInWithGoogleAdmin();
+      if (!isVerifiedAdminUser(user)) {
+        setErrorMsg(`الحساب (${user.email || ''}) غير مخول للنشر. يرجى الدخول بحساب المالك (${ADMIN_EMAIL}).`);
+      }
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'تعذر تسجيل الدخول عبر Google');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const scrollBodyTop = () => {
+    setTimeout(() => {
+      modalBodyRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+    }, 50);
+  };
+
   const resetForm = () => {
     setEditingWorkId(null);
     setTitle('');
@@ -108,13 +176,77 @@ export const AdminCreateWorkModal: React.FC<AdminCreateWorkModalProps> = ({
     setSynopsis('');
     setGenresText(category === 'movie' ? 'سينما، مغامرات' : 'مغامرات، أكشن');
     setDubStudio('');
+    setVideoLink('');
     setSeasonsCount(1);
     setEpisodesCount(category === 'movie' ? 1 : 12);
     setRating(9.2);
+    setSelectedTmdbMatch(null);
+    setTmdbResults([]);
+    setTmdbQuery('');
     setErrorMsg(null);
   };
 
+  const handleTmdbSearch = async () => {
+    const q = (tmdbQuery || title || originalTitle).trim();
+    if (!q) return;
+    setTmdbSearching(true);
+    setErrorMsg(null);
+    try {
+      const searchType = category === 'movie' ? 'movie' : 'tv';
+      const { configured, results } = await searchTmdbWorks(q, searchType);
+      if (!configured) {
+        setErrorMsg('مفتاح TMDB_API_KEY غير متاح بعد في إعدادات السيرفر.');
+      } else if (results.length === 0) {
+        setErrorMsg(`لم يتم العثور على نتائج في TMDB لـ «${q}» — جرب الاسم الإنجليزي.`);
+      }
+      setTmdbResults(results);
+    } finally {
+      setTmdbSearching(false);
+    }
+  };
+
+  const handlePickTmdbResult = async (item: TmdbSearchResult) => {
+    setSelectedTmdbMatch(item);
+    setTitle(item.title || item.originalTitle);
+    setOriginalTitle(item.originalTitle || item.title);
+    if (item.posterUrl) setCoverImage(item.posterUrl);
+    if (item.overview) setSynopsis(item.overview);
+    if (item.voteAverage > 0) setRating(item.voteAverage);
+    setTmdbResults([]);
+
+    // Fetch full details (genres, exact seasons & episodes count)
+    const full = await fetchTmdbEnrichmentForWork(
+      {
+        id: `tmdb-preview-${item.tmdbId}`,
+        title: item.title,
+        originalTitle: item.originalTitle,
+        category: item.mediaType === 'movie' ? 'movie' : category,
+      },
+      1,
+      true
+    );
+    if (full?.found) {
+      if (full.title) setTitle(full.title);
+      if (full.originalTitle) setOriginalTitle(full.originalTitle);
+      if (full.overview) setSynopsis(full.overview);
+      if (full.posterUrl) setCoverImage(full.posterUrl);
+      if (full.genres && full.genres.length > 0) setGenresText(full.genres.slice(0, 4).join('، '));
+      if (full.rating && full.rating > 0) setRating(full.rating);
+      if (item.mediaType !== 'movie') {
+        if (full.seasonsCount && full.seasonsCount > 0) setSeasonsCount(full.seasonsCount);
+        if (full.episodes && full.episodes.length > 0) {
+          setEpisodesCount(
+            Math.max(full.episodes.length, (full.seasonsCount || 1) * full.episodes.length)
+          );
+        }
+      }
+    }
+  };
+
   const handleSelectEdit = (work: CustomWorkRecord) => {
+    const firstEpId =
+      work.category === 'movie' ? `${work.workId}-movie-1` : `${work.workId}-ep-1`;
+    const existingSource = getCustomEpisodeSource(firstEpId);
     setEditingWorkId(work.workId);
     setCategory(work.category);
     setTitle(work.title);
@@ -123,11 +255,14 @@ export const AdminCreateWorkModal: React.FC<AdminCreateWorkModalProps> = ({
     setSynopsis(work.synopsis);
     setGenresText(work.genres.join('، '));
     setDubStudio(work.dubStudio);
+    setVideoLink(existingSource?.driveLink || existingSource?.videoUrl || '');
     setSeasonsCount(work.seasonsCount);
     setEpisodesCount(work.episodesCount);
     setRating(work.rating);
     setSavedWork(null);
+    setSavedWorkHasLink(false);
     setErrorMsg(null);
+    scrollBodyTop();
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -139,7 +274,8 @@ export const AdminCreateWorkModal: React.FC<AdminCreateWorkModalProps> = ({
       const compressed = await compressImageFileToDataUrl(file);
       setCoverImage(compressed);
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'تعذر تحميل الصورة');
+      setErrorMsg(formatCloudErrorMessage(err, 'تعذر تحميل الصورة'));
+      scrollBodyTop();
     } finally {
       setImageProcessing(false);
       e.target.value = '';
@@ -150,16 +286,24 @@ export const AdminCreateWorkModal: React.FC<AdminCreateWorkModalProps> = ({
     e.preventDefault();
     setErrorMsg(null);
 
+    if (!isOwnerVerified) {
+      setErrorMsg(`يرجى الضغط على زر "تسجيل دخول المالك بحساب Google" بالأعلى أولاً (${ADMIN_EMAIL}) لحفظ العمل في السحابة.`);
+      scrollBodyTop();
+      return;
+    }
     if (!title.trim()) {
       setErrorMsg('يرجى كتابة اسم العمل.');
+      scrollBodyTop();
       return;
     }
     if (!coverImage.trim()) {
       setErrorMsg('يرجى رفع صورة غلاف من جهازك أو وضع رابط الصورة.');
+      scrollBodyTop();
       return;
     }
     if (!synopsis.trim()) {
       setErrorMsg('يرجى كتابة وصف (Description) للعمل.');
+      scrollBodyTop();
       return;
     }
 
@@ -177,7 +321,7 @@ export const AdminCreateWorkModal: React.FC<AdminCreateWorkModalProps> = ({
         originalTitle: originalTitle.trim(),
         coverImage: coverImage.trim(),
         bannerImage: coverImage.trim(),
-        genres: parsedGenres.length > 0 ? parsedGenres : ['مغامرات'],
+        genres: parsedGenres.length > 0 ? parsedGenres : [category === 'movie' ? 'سينما' : 'مغامرات'],
         dubStudio: dubStudio.trim() || 'إضافة المالك',
         rating,
         seasonsCount: category === 'movie' ? 1 : seasonsCount,
@@ -185,10 +329,52 @@ export const AdminCreateWorkModal: React.FC<AdminCreateWorkModalProps> = ({
         synopsis: synopsis.trim(),
       });
 
+      if (selectedTmdbMatch) {
+        void saveTmdbWorkMapping(
+          saved.workId,
+          selectedTmdbMatch.tmdbId,
+          selectedTmdbMatch.mediaType,
+          saved.originalTitle || saved.title
+        );
+      }
+
+      let linkSaved = false;
+      const cleanedVideoInput = videoLink.trim();
+      if (cleanedVideoInput) {
+        const firstEpId =
+          saved.category === 'movie' ? `${saved.workId}-movie-1` : `${saved.workId}-ep-1`;
+        const normalizedLink = normalizeDriveDirectUrl(cleanedVideoInput);
+        const existingCfg = getCustomEpisodeSource(firstEpId);
+        const linkResult = await saveCustomEpisodeSource(firstEpId, {
+          driveLink: normalizedLink,
+          videoUrl: normalizedLink,
+          accountLabel: existingCfg?.accountLabel || '',
+          backupDriveLinks: existingCfg?.backupDriveLinks || [],
+          subtitles: existingCfg?.subtitles?.length ? existingCfg.subtitles : DEFAULT_SUBTITLE_TRACKS,
+        });
+
+        if (!linkResult.savedToCloud) {
+          setSavedWork(saved);
+          setSavedWorkHasLink(false);
+          setErrorMsg(
+            `تم حفظ العمل «${saved.title}»، لكن تعذر حفظ رابط الفيديو في السحابة: ${formatCloudErrorMessage(
+              linkResult.cloudError,
+              'تحقق من الرابط أو أعد المحاولة من لوحة الروابط.'
+            )}`
+          );
+          scrollBodyTop();
+          return;
+        }
+        linkSaved = true;
+      }
+
       setSavedWork(saved);
+      setSavedWorkHasLink(linkSaved);
       resetForm();
+      scrollBodyTop();
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'حدث خطأ أثناء الحفظ في السحابة');
+      setErrorMsg(formatCloudErrorMessage(err, 'حدث خطأ أثناء الحفظ في السحابة'));
+      scrollBodyTop();
     } finally {
       setSaving(false);
     }
@@ -202,7 +388,8 @@ export const AdminCreateWorkModal: React.FC<AdminCreateWorkModalProps> = ({
         resetForm();
       }
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'تعذر حذف العمل');
+      setErrorMsg(formatCloudErrorMessage(err, 'تعذر حذف العمل'));
+      scrollBodyTop();
     }
   };
 
@@ -252,10 +439,31 @@ export const AdminCreateWorkModal: React.FC<AdminCreateWorkModalProps> = ({
         </div>
 
         {/* Body */}
-        <div className="p-5 overflow-y-auto flex-1 space-y-5">
+        <div ref={modalBodyRef} className="p-4 sm:p-5 overflow-y-auto flex-1 space-y-5">
+          {/* Owner Google Sign-in Gate Notice (shown only when entered via passcode without Google login) */}
+          {!isOwnerVerified && (
+            <div className="p-3.5 rounded-xl bg-blue-950/50 border border-blue-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-xs text-blue-200 font-bold">
+                <Cloud className="w-4 h-4 text-blue-400 shrink-0" />
+                <span>
+                  لتفعيل إضافة ونشر المسلسلات والأفلام في السحابة، سجّل الدخول بحساب المالك ({ADMIN_EMAIL}).
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleOwnerLogin()}
+                disabled={authLoading}
+                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-black text-xs flex items-center justify-center gap-1.5 shrink-0 cursor-pointer shadow"
+              >
+                <Cloud className="w-3.5 h-3.5" />
+                <span>{authLoading ? 'جاري فتح Google...' : 'تسجيل دخول المالك (Google)'}</span>
+              </button>
+            </div>
+          )}
+
           {/* Category Picker */}
-          <div className="grid grid-cols-3 gap-2 bg-neutral-950 p-1.5 rounded-xl border border-neutral-800">
-            {(['anime', 'movie', 'dubbed'] as CustomWorkCategory[]).map((cat) => {
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-neutral-950 p-1.5 rounded-xl border border-neutral-800">
+            {(['anime', 'movie', 'tv', 'dubbed'] as CustomWorkCategory[]).map((cat) => {
               const catInfo = CATEGORY_INFO[cat];
               const active = category === cat;
               return (
@@ -269,7 +477,7 @@ export const AdminCreateWorkModal: React.FC<AdminCreateWorkModalProps> = ({
                       setEpisodesCount(cat === 'movie' ? 1 : 12);
                     }
                   }}
-                  className={`py-2 px-3 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                  className={`py-2 px-2.5 rounded-lg text-[11px] sm:text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
                     active
                       ? 'bg-rose-600 text-white shadow'
                       : 'text-neutral-400 hover:text-white hover:bg-neutral-900'
@@ -289,10 +497,14 @@ export const AdminCreateWorkModal: React.FC<AdminCreateWorkModalProps> = ({
                 <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
                 <div>
                   <div className="text-xs sm:text-sm font-black text-emerald-300">
-                    تم نشر «{savedWork.title}» وحفظه في السحابة للأبد!
+                    {savedWorkHasLink
+                      ? `تم نشر «${savedWork.title}» وحفظ رابط المشاهدة في السحابة بنجاح!`
+                      : `تم نشر «${savedWork.title}» وحفظه في السحابة للأبد!`}
                   </div>
                   <div className="text-[11px] text-emerald-200/80 mt-0.5">
-                    يظهر الآن في القسم لجميع الزوار. يمكنك الآن إضافة روابط Google Drive للحلقات.
+                    {savedWorkHasLink
+                      ? 'أصبح العمل جاهزاً للمشاهدة فوراً لكل الزوار. يمكنك تعديل الروابط أو الترجمات في أي وقت.'
+                      : 'يظهر الآن في القسم لجميع الزوار. يمكنك الآن إضافة روابط Google Drive للحلقات.'}
                   </div>
                 </div>
               </div>
@@ -311,7 +523,7 @@ export const AdminCreateWorkModal: React.FC<AdminCreateWorkModalProps> = ({
                   className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-neutral-950 font-black text-xs rounded-xl flex items-center gap-1.5 shrink-0 cursor-pointer shadow"
                 >
                   <Link2 className="w-4 h-4" />
-                  <span>إضافة الروابط الآن</span>
+                  <span>{savedWorkHasLink ? 'تعديل الروابط والترجمة' : 'إضافة الروابط الآن'}</span>
                 </button>
               )}
             </div>
@@ -323,6 +535,76 @@ export const AdminCreateWorkModal: React.FC<AdminCreateWorkModalProps> = ({
               <span>{errorMsg}</span>
             </div>
           )}
+
+          {/* Optional TMDB One-Click Auto-Fill */}
+          <div className="p-3.5 rounded-2xl bg-neutral-950 border border-sky-500/30 space-y-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs font-black text-sky-300 flex items-center gap-1.5">
+                <Sparkles className="w-4 h-4 text-sky-400" />
+                <span>جلب وتعبئة البيانات تلقائياً من TMDB (اختياري)</span>
+              </span>
+              {selectedTmdbMatch && (
+                <span className="text-[10px] font-bold text-emerald-300 bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 rounded-full">
+                  مرتبط بـ TMDB #{selectedTmdbMatch.tmdbId}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={tmdbQuery}
+                onChange={(e) => setTmdbQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    void handleTmdbSearch();
+                  }
+                }}
+                placeholder="اكتب اسم المسلسل أو الفيلم أو الأنمي بالإنجليزية أو العربية (مثال: Game of Thrones)..."
+                className="flex-1 bg-neutral-900 border border-neutral-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-sky-400"
+              />
+              <button
+                type="button"
+                disabled={tmdbSearching}
+                onClick={() => void handleTmdbSearch()}
+                className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white font-black text-xs shrink-0 cursor-pointer"
+              >
+                {tmdbSearching ? 'جاري البحث...' : 'بحث TMDB'}
+              </button>
+            </div>
+
+            {tmdbResults.length > 0 && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 max-h-56 overflow-y-auto">
+                {tmdbResults.map((res) => (
+                  <button
+                    key={`${res.mediaType}-${res.tmdbId}`}
+                    type="button"
+                    onClick={() => void handlePickTmdbResult(res)}
+                    className="flex items-center gap-2.5 p-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-sky-400/50 text-right cursor-pointer transition-colors"
+                  >
+                    {res.posterUrl ? (
+                      <img
+                        src={res.posterUrl}
+                        alt={res.title}
+                        className="w-10 h-14 object-cover rounded-lg shrink-0"
+                      />
+                    ) : (
+                      <div className="w-10 h-14 rounded-lg bg-neutral-800 shrink-0" />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs font-bold text-white truncate">{res.title}</div>
+                      <div className="text-[10px] text-neutral-400 truncate" dir="ltr">
+                        {res.originalTitle} · {res.releaseDate?.slice(0, 4) || ''}
+                      </div>
+                      <div className="text-[10px] text-amber-400 font-bold mt-0.5">
+                        ★ {res.voteAverage}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* Create / Edit Form */}
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -377,7 +659,6 @@ export const AdminCreateWorkModal: React.FC<AdminCreateWorkModalProps> = ({
                   </label>
                   <input
                     type="text"
-                    required
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
                     placeholder={
@@ -385,10 +666,42 @@ export const AdminCreateWorkModal: React.FC<AdminCreateWorkModalProps> = ({
                         ? 'مثال: فيلم اسمك (Your Name)'
                         : category === 'anime'
                         ? 'مثال: هجوم العمالقة'
+                        : category === 'tv'
+                        ? 'مثال: صراع العروش (Game of Thrones)'
                         : 'مثال: عالم غامبول المدهش'
                     }
                     className="w-full bg-neutral-950 border border-neutral-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-rose-500"
                   />
+                </div>
+
+                {/* Direct Video / Google Drive Link Input */}
+                <div className="p-3 rounded-xl bg-neutral-950 border border-blue-500/30 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="text-xs font-bold text-blue-300 flex items-center gap-1.5">
+                      <Link2 className="w-3.5 h-3.5 text-blue-400" />
+                      <span>
+                        {category === 'movie'
+                          ? 'رابط مشاهدة الفيلم (Google Drive أو رابط مباشر):'
+                          : 'رابط الحلقة الأولى (اختياري — Google Drive):'}
+                      </span>
+                    </label>
+                    {extractDriveFileId(videoLink) && (
+                      <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/15 px-2 py-0.5 rounded-full">
+                        رابط Drive صحيح
+                      </span>
+                    )}
+                  </div>
+                  <input
+                    type="text"
+                    value={videoLink}
+                    onChange={(e) => setVideoLink(e.target.value)}
+                    placeholder="https://drive.google.com/file/d/.../view"
+                    dir="ltr"
+                    className="w-full bg-neutral-900 border border-neutral-700 rounded-xl px-3 py-2 text-xs font-mono text-white placeholder:text-neutral-600 focus:outline-none focus:border-blue-500"
+                  />
+                  <p className="text-[10px] text-neutral-400">
+                    ضعه هنا وسيُربط {category === 'movie' ? 'الفيلم' : 'المسلسل'} للمشاهدة فوراً، أو اتركه فارغاً وأضفه لاحقاً من لوحة الروابط.
+                  </p>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -400,7 +713,7 @@ export const AdminCreateWorkModal: React.FC<AdminCreateWorkModalProps> = ({
                       type="text"
                       value={originalTitle}
                       onChange={(e) => setOriginalTitle(e.target.value)}
-                      placeholder="Attack on Titan"
+                      placeholder="Your Name / Attack on Titan"
                       className="w-full bg-neutral-950 border border-neutral-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-rose-500"
                       dir="ltr"
                     />
@@ -425,7 +738,6 @@ export const AdminCreateWorkModal: React.FC<AdminCreateWorkModalProps> = ({
                     الوصف (Description / قصة العمل):
                   </label>
                   <textarea
-                    required
                     rows={4}
                     value={synopsis}
                     onChange={(e) => setSynopsis(e.target.value)}
@@ -434,7 +746,7 @@ export const AdminCreateWorkModal: React.FC<AdminCreateWorkModalProps> = ({
                   />
                 </div>
 
-                {category !== 'movie' && (
+                {category !== 'movie' ? (
                   <div className="grid grid-cols-3 gap-3">
                     <div>
                       <label className="text-xs font-bold text-neutral-300 block mb-1">
@@ -477,20 +789,51 @@ export const AdminCreateWorkModal: React.FC<AdminCreateWorkModalProps> = ({
                       />
                     </div>
                   </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-neutral-300 block mb-1">
+                        التقييم (من 10):
+                      </label>
+                      <input
+                        type="number"
+                        step="0.1"
+                        min={0}
+                        max={10}
+                        value={rating}
+                        onChange={(e) => setRating(Math.min(10, Math.max(0, Number(e.target.value) || 0)))}
+                        className="w-full bg-neutral-950 border border-neutral-700 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-rose-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-neutral-300 block mb-1">
+                        الاستوديو / المترجم (اختياري):
+                      </label>
+                      <input
+                        type="text"
+                        value={dubStudio}
+                        onChange={(e) => setDubStudio(e.target.value)}
+                        placeholder="مثال: دبلجة عربية / ترجمة خاصة"
+                        className="w-full bg-neutral-950 border border-neutral-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-rose-500"
+                      />
+                    </div>
+                  </div>
                 )}
 
-                <div>
-                  <label className="text-xs font-bold text-neutral-300 block mb-1">
-                    الاستوديو / المترجم (اختياري):
-                  </label>
-                  <input
-                    type="text"
-                    value={dubStudio}
-                    onChange={(e) => setDubStudio(e.target.value)}
-                    placeholder="مثال: دبلجة عربية / ترجمة خاصة"
-                    className="w-full bg-neutral-950 border border-neutral-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-rose-500"
-                  />
-                </div>
+                {category !== 'movie' && (
+                  <div>
+                    <label className="text-xs font-bold text-neutral-300 block mb-1">
+                      الاستوديو / المترجم (اختياري):
+                    </label>
+                    <input
+                      type="text"
+                      value={dubStudio}
+                      onChange={(e) => setDubStudio(e.target.value)}
+                      placeholder="مثال: دبلجة عربية / ترجمة خاصة"
+                      className="w-full bg-neutral-950 border border-neutral-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-rose-500"
+                    />
+                  </div>
+                )}
               </div>
             </div>
 

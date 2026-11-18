@@ -10,6 +10,7 @@ import {
   signInWithGoogleAdmin,
   signOutAdmin,
 } from '../firebase.ts';
+import { BrandLogo } from './BrandLogo.tsx';
 
 interface AccessGateScreenProps {
   gateConfig: AccessGateConfig;
@@ -85,8 +86,8 @@ export const AccessGateScreen: React.FC<AccessGateScreenProps> = ({
             <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-rose-600 to-rose-700 flex items-center justify-center text-white shadow-xl shadow-rose-950/60 border border-rose-400/30">
               <Lock className="w-8 h-8" />
             </div>
-            <div className="w-7 h-7 rounded-lg bg-neutral-950 border border-neutral-700 flex items-center justify-center text-[11px] font-mono font-black text-amber-400 absolute -bottom-1.5 -left-1.5 shadow">
-              AV
+            <div className="absolute -bottom-2 -left-2">
+              <BrandLogo size="xs" />
             </div>
           </div>
 

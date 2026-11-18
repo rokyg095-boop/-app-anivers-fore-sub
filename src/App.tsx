@@ -2,8 +2,6 @@ import React, { useState } from 'react';
 import {
   COMICS_DATA,
   DUBBED_WORKS,
-  ANIME_WORKS,
-  MOVIES_WORKS,
   Comic,
   ComicChapter,
   DubEpisode,
@@ -12,7 +10,11 @@ import {
 import { Navbar, NavTabType } from './components/Navbar.tsx';
 import { AnimeView } from './components/AnimeView.tsx';
 import { MoviesView } from './components/MoviesView.tsx';
-import { HeroSection } from './components/HeroSection.tsx';
+import { TvSeriesView } from './components/TvSeriesView.tsx';
+import { GlobalSearchModal, GlobalSearchPanel } from './components/GlobalSearchPanel.tsx';
+import { StyledHeroShowcase } from './components/StyledHeroShowcase.tsx';
+import { StyleSelectorModal } from './components/StyleSelectorModal.tsx';
+import { BrandLogo } from './components/BrandLogo.tsx';
 import { ComicReader } from './components/ComicReader.tsx';
 import { ComicCard } from './components/ComicCard.tsx';
 import { DubCard } from './components/DubCard.tsx';
@@ -23,6 +25,10 @@ import { ComicDetailModal } from './components/ComicDetailModal.tsx';
 import { AdminMediaDashboard } from './components/AdminMediaDashboard.tsx';
 import { AdminCreateWorkModal } from './components/AdminCreateWorkModal.tsx';
 import { AccessGateScreen } from './components/AccessGateScreen.tsx';
+import { OfflineIndicator } from './components/OfflineIndicator.tsx';
+import { BrowseShowcaseSection } from './components/BrowseShowcaseSection.tsx';
+import { PWAInstallButton } from './components/PWAInstallButton.tsx';
+import { useSiteStyle } from './utils/siteStyle.ts';
 import {
   syncEpisodeSourcesFromServer,
   attachRealtimeCloudListener,
@@ -30,11 +36,17 @@ import {
 } from './utils/videoSource.ts';
 import {
   CustomWorkCategory,
-  getCustomSeriesByCategory,
   syncCustomWorksFromCloud,
   attachCustomWorksRealtimeListener,
   CUSTOM_WORKS_UPDATED_EVENT,
 } from './utils/customWorks.ts';
+import {
+  attachCatalogOverridesRealtimeListener,
+  CATALOG_OVERRIDES_UPDATED_EVENT,
+  getAllEffectiveMediaWorks,
+  getEffectiveWorksByCategory,
+  syncCatalogOverridesFromCloud,
+} from './utils/catalogOverrides.ts';
 import {
   AccessGateConfig,
   ACCESS_GATE_UPDATED_EVENT,
@@ -44,31 +56,21 @@ import {
 } from './utils/accessGate.ts';
 import { isVerifiedAdminUser, subscribeAuthState } from './firebase.ts';
 import {
-  BookOpen,
   Film,
-  Sparkles,
   Search,
-  Filter,
-  Flame,
   Volume2,
   ChevronLeft,
-  Tv,
-  CheckCircle2,
-  ShieldAlert,
   ShieldCheck,
-  Heart,
-  Grid,
-  Layers,
-  Play,
-  Clock,
-  Lock,
-  Plus
+  MonitorPlay,
 } from 'lucide-react';
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<NavTabType>('home');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedGenre, setSelectedGenre] = useState<string>('all');
+  const [isSearchModalOpen, setIsSearchModalOpen] = useState<boolean>(false);
+  const [isStyleModalOpen, setIsStyleModalOpen] = useState<boolean>(false);
+  const [siteStyleId, setSiteStyleId, siteStyleMeta] = useSiteStyle();
   const [isAdminOpen, setIsAdminOpen] = useState<boolean>(false);
   const [isOwnerAdmin, setIsOwnerAdmin] = useState<boolean>(false);
   const [authReadyUser, setAuthReadyUser] = useState<boolean>(false);
@@ -102,24 +104,12 @@ export default function App() {
   // Dubbed Series Detail Modal State - Opens series seasons & episodes selection
   const [selectedDubForDetail, setSelectedDubForDetail] = useState<DubSeries | null>(null);
 
-  // The 2 flagship distinct comic series: Adventure Time (#0) and I Hate You, Please Die (#1)
   const adventureTimeComic = COMICS_DATA[0];
-  const hateYouComic = COMICS_DATA[1];
-
-  // The flagship dubbed series: Over The Garden Wall (خلف حائط الحديقة)
-  const gardenWallSeries = DUBBED_WORKS[0];
 
   const handleOpenAdventureTimeReader = () => {
     setActiveReadingSession({
       comic: adventureTimeComic,
       chapter: adventureTimeComic.chapters[0],
-    });
-  };
-
-  const handleOpenHateYouReader = () => {
-    setActiveReadingSession({
-      comic: hateYouComic,
-      chapter: hateYouComic.chapters[0],
     });
   };
 
@@ -183,23 +173,27 @@ export default function App() {
     };
   }, []);
 
-  // Sync saved episode links + custom works ONLY after site access is unlocked
+  // Sync saved episode links + custom works + catalog overrides ONLY after site access is unlocked
   React.useEffect(() => {
     if (!canAccessSite) return;
 
     void syncEpisodeSourcesFromServer();
     void syncCustomWorksFromCloud();
+    void syncCatalogOverridesFromCloud();
 
     let unsubscribeRealtime: (() => void) | null = null;
     let unsubscribeWorksRealtime: (() => void) | null = null;
+    let unsubscribeCatalogRealtime: (() => void) | null = null;
     if (authReadyUser) {
       unsubscribeRealtime = attachRealtimeCloudListener();
       unsubscribeWorksRealtime = attachCustomWorksRealtimeListener();
+      unsubscribeCatalogRealtime = attachCatalogOverridesRealtimeListener();
     }
 
     const handleSourcesUpdate = () => setSourcesTick((t) => t + 1);
     window.addEventListener(SOURCES_UPDATED_EVENT, handleSourcesUpdate);
     window.addEventListener(CUSTOM_WORKS_UPDATED_EVENT, handleSourcesUpdate);
+    window.addEventListener(CATALOG_OVERRIDES_UPDATED_EVENT, handleSourcesUpdate);
 
     const handleKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'a' || e.key === 'A')) {
@@ -215,13 +209,41 @@ export default function App() {
       if (unsubscribeWorksRealtime) {
         unsubscribeWorksRealtime();
       }
+      if (unsubscribeCatalogRealtime) {
+        unsubscribeCatalogRealtime();
+      }
       window.removeEventListener(SOURCES_UPDATED_EVENT, handleSourcesUpdate);
       window.removeEventListener(CUSTOM_WORKS_UPDATED_EVENT, handleSourcesUpdate);
+      window.removeEventListener(CATALOG_OVERRIDES_UPDATED_EVENT, handleSourcesUpdate);
       window.removeEventListener('keydown', handleKey);
     };
   }, [canAccessSite, authReadyUser]);
 
-  const allDubbedWorks = [...DUBBED_WORKS, ...getCustomSeriesByCategory('dubbed')];
+  const allDubbedWorks = getEffectiveWorksByCategory('dubbed');
+  const allAnimeWorks = getEffectiveWorksByCategory('anime');
+  const allMovieWorks = getEffectiveWorksByCategory('movie');
+  const allTvWorks = getEffectiveWorksByCategory('tv');
+  const allEffectiveMedia = getAllEffectiveMediaWorks();
+
+  const featuredDubSeries =
+    allDubbedWorks.find((s) => s.id === DUBBED_WORKS[0]?.id) ||
+    allDubbedWorks[0] ||
+    allEffectiveMedia[0] ||
+    null;
+
+  const liveSelectedDub = selectedDubForDetail
+    ? allEffectiveMedia.find((s) => s.id === selectedDubForDetail.id) || null
+    : null;
+  const liveActiveVideoSeries = activeVideoSession
+    ? allEffectiveMedia.find((s) => s.id === activeVideoSession.series.id) ||
+      activeVideoSession.series
+    : null;
+  const liveActiveVideoEpisode =
+    liveActiveVideoSeries && activeVideoSession
+      ? (liveActiveVideoSeries.seasons.flatMap((s) => s.episodes || []).find(
+          (e) => e.id === activeVideoSession.episode.id
+        ) || activeVideoSession.episode)
+      : null;
 
   if (!canAccessSite) {
     return (
@@ -233,7 +255,14 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col font-sans" dir="rtl">
+    <div
+      data-site-style={siteStyleId}
+      style={{ backgroundColor: siteStyleMeta.bgHex }}
+      className={`min-h-screen flex flex-col font-sans transition-colors duration-300 ${
+        siteStyleMeta.isLight ? 'text-neutral-900' : 'text-neutral-100'
+      }`}
+      dir="rtl"
+    >
       {/* Navigation Header */}
       <Navbar
         currentTab={currentTab}
@@ -242,246 +271,279 @@ export default function App() {
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
         onOpenFeaturedReader={handleOpenAdventureTimeReader}
+        onOpenSearch={() => setIsSearchModalOpen(true)}
+        onOpenStyles={() => setIsStyleModalOpen(true)}
+        currentStyleName={siteStyleMeta.name}
+        isLightMode={Boolean(siteStyleMeta.isLight)}
       />
 
       {/* Main Content Area */}
       <main className="flex-1 pb-16">
         {/* VIEW: HOME PAGE */}
         {currentTab === 'home' && (
-          <div className="space-y-16">
-            {/* Top Hero Section */}
-            <HeroSection
-              featuredComic={adventureTimeComic}
-              featuredDub={gardenWallSeries}
+          <div className="space-y-14">
+            {/* Dynamic Multi-Style Hero Showcase (100% populated with User's Real Series & Movies) */}
+            <StyledHeroShowcase
+              styleId={siteStyleId}
+              featuredWorks={allEffectiveMedia}
+              comics={COMICS_DATA}
+              onSelectMedia={(s) => setSelectedDubForDetail(s)}
+              onPlayMedia={(ep, s) => setActiveVideoSession({ episode: ep, series: s })}
+              onSelectComic={(c) => setSelectedComicForDetail(c)}
               onReadComic={(c) =>
                 setActiveReadingSession({ comic: c, chapter: c.chapters[0] })
               }
-              onWatchDub={(d) => {
-                const ep1 = d.episodes.find((e) => !e.isComingSoon) || d.episodes[0];
-                setActiveVideoSession({ episode: ep1, series: d });
-              }}
-              onSelectComicSeries={(c) => setSelectedComicForDetail(c)}
+              onOpenSearch={() => setIsSearchModalOpen(true)}
             />
 
-            {/* Featured Premier Dubbed Series Showcase: "خلف حائط الحديقة" */}
+            {/* Interactive Browse Entry ("التصفح") & Kinetic 3D Horizontal Stage */}
+            <BrowseShowcaseSection
+              mediaWorks={allEffectiveMedia}
+              comics={COMICS_DATA}
+              onSelectMedia={(s) => setSelectedDubForDetail(s)}
+              onPlayMedia={(ep, s) => setActiveVideoSession({ episode: ep, series: s })}
+              onSelectComic={(c) => setSelectedComicForDetail(c)}
+              onReadComic={(c) =>
+                setActiveReadingSession({ comic: c, chapter: c.chapters[0] })
+              }
+            />
+
+            {/* Global Search & Genre Classification Explorer */}
             <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-              <div className="relative rounded-3xl overflow-hidden border-2 border-rose-500/30 bg-gradient-to-r from-neutral-900 via-neutral-900 to-rose-950/30 p-6 sm:p-8 shadow-2xl">
-                <div className="flex flex-col lg:flex-row items-center gap-8">
-                  {/* Banner Image / Poster */}
-                  <div
-                    onClick={() => setSelectedDubForDetail(gardenWallSeries)}
-                    className="relative w-full lg:w-96 aspect-video rounded-2xl overflow-hidden shrink-0 shadow-2xl border border-rose-500/40 cursor-pointer group bg-neutral-950"
-                  >
-                    <img
-                      src={gardenWallSeries.bannerImage}
-                      alt={gardenWallSeries.title}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                      referrerPolicy="no-referrer"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-neutral-950 via-transparent to-transparent" />
-                    
-                    <div className="absolute top-3 right-3 bg-rose-600 text-white font-mono text-[11px] font-bold px-2.5 py-0.5 rounded-full shadow">
-                      العمل المدبلج الأول الحصري
-                    </div>
-
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <div className="w-14 h-14 rounded-full bg-rose-600/90 text-white flex items-center justify-center shadow-xl group-hover:scale-110 group-hover:bg-rose-500 transition-all">
-                        <Play className="w-7 h-7 fill-white translate-x-0.5" />
-                      </div>
-                    </div>
-
-                    <div className="absolute bottom-2.5 right-3 text-xs font-bold text-white flex items-center gap-1.5">
-                      <Clock className="w-3.5 h-3.5 text-amber-400" />
-                      <span>الحلقة الأولى: 14:54 دقيقة</span>
-                    </div>
-                  </div>
-
-                  {/* Info Column */}
-                  <div className="flex-1 text-right">
-                    <div className="flex flex-wrap items-center gap-2 mb-2">
-                      <span className="text-xs font-bold text-rose-500 font-mono tracking-wider">
-                        {gardenWallSeries.dubStudio}
-                      </span>
-                      <span className="text-neutral-500">·</span>
-                      <span className="text-xs font-mono text-amber-400">تقييم 4.99 ★</span>
-                      <span className="text-neutral-500">·</span>
-                      <span className="text-xs text-neutral-400">
-                        {gardenWallSeries.seasons.length} موسم (الموسم الأول)
-                      </span>
-                    </div>
-
-                    <h2 className="text-2xl sm:text-4xl font-black text-white mb-2">
-                      مسلسل «{gardenWallSeries.title}» المدبلج
+              <div
+                className={`rounded-3xl border backdrop-blur-xl p-4 sm:p-6 shadow-2xl space-y-4 ${
+                  siteStyleMeta.isLight
+                    ? 'bg-[#101422] border-neutral-300 text-white'
+                    : 'bg-white/[0.03] border-white/10'
+                }`}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-2" style={{ color: '#ffffff' }}>
+                      <Search className="w-4 h-4 text-violet-400" />
+                      <span>البحث الشامل والتصفية حسب التصنيفات</span>
                     </h2>
-
-                    <p className="text-xs sm:text-sm text-neutral-300 leading-relaxed mb-6 max-w-2xl">
-                      {gardenWallSeries.synopsis}
+                    <p className="text-xs text-white/60 mt-0.5">
+                      ابحث عن أي مسلسل، فيلم، أنمي، مسلسل تلفزيوني، أو اختر التصنيف المفضل لديك مباشرة
                     </p>
-
-                    {/* Action buttons with quick access to episodes 1 through 6 */}
-                    <div className="space-y-3">
-                      <div className="flex flex-wrap items-center gap-2">
-                        {gardenWallSeries.episodes.filter(ep => !ep.isComingSoon).map((ep) => (
-                          <button
-                            key={ep.id}
-                            onClick={() => {
-                              setActiveVideoSession({ episode: ep, series: gardenWallSeries });
-                            }}
-                            className="px-3.5 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-md shadow-rose-950/60 transition-all cursor-pointer hover:scale-105 border border-rose-500/40"
-                          >
-                            <Play className="w-3.5 h-3.5 fill-white" />
-                            <span>حلقة {ep.episodeNumber} ({ep.duration})</span>
-                          </button>
-                        ))}
-
-                        <button
-                          onClick={() => setSelectedDubForDetail(gardenWallSeries)}
-                          className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-white font-bold text-xs rounded-xl flex items-center gap-2 transition-colors cursor-pointer border border-neutral-700"
-                        >
-                          <Layers className="w-3.5 h-3.5 text-amber-400" />
-                          <span>عرض كل الحلقات (8)</span>
-                        </button>
-                      </div>
-                      <div className="flex items-center gap-2 text-xs text-emerald-400 font-bold">
-                        <CheckCircle2 className="w-4 h-4 shrink-0" />
-                        <span>الحلقات (1، 2، 3، 4، 5، 6) متوفرة الآن للمشاهدة الفورية بالدبلجة الرسمية كاملة وبجودة عالية!</span>
-                      </div>
-                    </div>
                   </div>
                 </div>
+                <GlobalSearchPanel
+                  onSelectMedia={(s) => setSelectedDubForDetail(s)}
+                  onSelectComic={(c) => setSelectedComicForDetail(c)}
+                  onNavigateTab={(tab) => {
+                    setCurrentTab(tab);
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                />
               </div>
             </section>
 
-            {/* Side-by-Side Featured Duo Banner (وقت المغامرة & أكرهك، أرجوك مت) */}
+            {/* Section 1: Animation & Cartoon Grid (قسم الأنميشن والكرتون) */}
             <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-              <div className="border-b border-neutral-800 pb-4 mb-6 flex items-center justify-between">
+              <div className="flex items-end justify-between mb-6 pb-4 border-b border-white/10">
                 <div>
-                  <span className="text-xs font-bold text-amber-500 font-mono tracking-wider">
-                    السلاسل الرئيسية المستقلة
-                  </span>
-                  <h2 className="text-2xl sm:text-3xl font-black text-white mt-1">
-                    أبرز سلاسل الكوميكس في المنصة
-                  </h2>
-                </div>
-                <span className="text-xs text-neutral-400 font-mono">
-                  لكل سلسلة غلافها وعارضها وفصولها الخاصة دون اختلاط
-                </span>
-              </div>
-
-              {/* 2-Column Grid showcasing both distinct series with independent reader launch */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* 1. Adventure Time Box */}
-                <div className="relative rounded-3xl overflow-hidden border-2 border-amber-500/30 bg-gradient-to-br from-neutral-900 via-neutral-900 to-amber-950/20 p-6 flex flex-col sm:flex-row gap-5 shadow-xl hover:border-amber-500/60 transition-all">
-                  <div className="w-36 aspect-[2/3] rounded-2xl overflow-hidden shrink-0 shadow-xl border border-amber-500/40 mx-auto sm:mx-0">
-                    <img
-                      src={adventureTimeComic.coverImage}
-                      alt={adventureTimeComic.title}
-                      className="w-full h-full object-cover"
-                      referrerPolicy="no-referrer"
-                    />
-                  </div>
-                  <div className="flex flex-col justify-between flex-1 text-right">
-                    <div>
-                      <div className="flex items-center gap-2 text-xs text-amber-400 font-bold mb-1">
-                        <span>{adventureTimeComic.arabicPublisher}</span>
-                        <span>·</span>
-                        <span>{adventureTimeComic.chapters[0].pagesCount} صفحة</span>
-                      </div>
-                      <h3 className="text-xl font-black text-white mb-1">
-                        {adventureTimeComic.title}
-                      </h3>
-                      <p className="text-xs text-neutral-400 line-clamp-3 leading-relaxed mb-4">
-                        {adventureTimeComic.synopsis}
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-2.5">
-                      <button
-                        onClick={handleOpenAdventureTimeReader}
-                        className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-xs rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer shadow-lg shadow-amber-950"
-                      >
-                        <BookOpen className="w-4 h-4" />
-                        <span>فتح عارض الصفحات</span>
-                      </button>
-                      <button
-                        onClick={() => setSelectedComicForDetail(adventureTimeComic)}
-                        className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-750 text-white font-bold text-xs rounded-xl transition-colors cursor-pointer"
-                      >
-                        قائمة الفصول
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* 2. I Hate You, Please Die Box */}
-                <div className="relative rounded-3xl overflow-hidden border-2 border-rose-500/30 bg-gradient-to-br from-neutral-900 via-neutral-900 to-rose-950/20 p-6 flex flex-col sm:flex-row gap-5 shadow-xl hover:border-rose-500/60 transition-all">
-                  <div className="w-36 aspect-[2/3] rounded-2xl overflow-hidden shrink-0 shadow-xl border border-rose-500/40 mx-auto sm:mx-0">
-                    <img
-                      src={hateYouComic.coverImage}
-                      alt={hateYouComic.title}
-                      className="w-full h-full object-cover"
-                      referrerPolicy="no-referrer"
-                    />
-                  </div>
-                  <div className="flex flex-col justify-between flex-1 text-right">
-                    <div>
-                      <div className="flex items-center gap-2 text-xs text-rose-500 font-bold mb-1">
-                        <span>{hateYouComic.arabicPublisher}</span>
-                        <span>·</span>
-                        <span>{hateYouComic.chapters[0].pagesCount} صفحة</span>
-                      </div>
-                      <h3 className="text-xl font-black text-white mb-1">
-                        {hateYouComic.title}
-                      </h3>
-                      <p className="text-xs text-neutral-400 line-clamp-3 leading-relaxed mb-4">
-                        {hateYouComic.synopsis}
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-2.5">
-                      <button
-                        onClick={handleOpenHateYouReader}
-                        className="px-4 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer shadow-lg shadow-rose-950"
-                      >
-                        <BookOpen className="w-4 h-4" />
-                        <span>فتح عارض الصفحات</span>
-                      </button>
-                      <button
-                        onClick={() => setSelectedComicForDetail(hateYouComic)}
-                        className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-750 text-white font-bold text-xs rounded-xl transition-colors cursor-pointer"
-                      >
-                        قائمة الفصول
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            {/* Section 1: Latest Comic Chapters (أحدث فصول الكوميكس) */}
-            <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-              <div className="flex items-end justify-between mb-8 pb-4 border-b border-neutral-800">
-                <div>
-                  <div className="flex items-center gap-2 text-xs text-rose-500 font-bold uppercase tracking-wider mb-1">
-                    <Flame className="w-4 h-4" />
-                    <span>تحديثات مستمرة</span>
+                  <div className="text-xs text-violet-300 font-bold mb-1">
+                    مسلسلات الأنميشن والكرتون
                   </div>
                   <h2 className="text-2xl sm:text-3xl font-black text-white">
-                    أحدث فصول الكوميكس المترجمة
+                    قسم الأنميشن والكرتون
                   </h2>
                 </div>
 
                 <button
-                  onClick={() => setCurrentTab('comics')}
-                  className="text-xs sm:text-sm font-bold text-neutral-400 hover:text-white flex items-center gap-1 transition-colors cursor-pointer"
+                  type="button"
+                  onClick={() => {
+                    setCurrentTab('dubbed');
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  className="text-xs sm:text-sm font-bold text-white/70 hover:text-white flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap"
                 >
-                  <span>عرض مكتبة الكوميكس كاملة</span>
+                  <span>عرض الكل</span>
                   <ChevronLeft className="w-4 h-4" />
                 </button>
               </div>
 
-              {/* Grid of latest comics */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
+                {allDubbedWorks.map((series) => (
+                  <DubSeriesCard
+                    key={series.id}
+                    series={series}
+                    onSelectSeries={(s) => setSelectedDubForDetail(s)}
+                    onQuickPlay={(ep, s) => setActiveVideoSession({ episode: ep, series: s })}
+                  />
+                ))}
+              </div>
+            </section>
+
+            {/* Section 2: Movies Grid (الأفلام السينمائية) */}
+            {allMovieWorks.length > 0 && (
+              <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div className="flex items-end justify-between mb-6 pb-4 border-b border-white/10">
+                  <div>
+                    <div className="text-xs text-amber-300 font-bold mb-1">
+                      صالة العرض السينمائي
+                    </div>
+                    <h2 className="text-2xl sm:text-3xl font-black text-white">
+                      الأفلام السينمائية
+                    </h2>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCurrentTab('movies');
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    className="text-xs sm:text-sm font-bold text-white/70 hover:text-white flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    <span>قسم الأفلام</span>
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
+                  {allMovieWorks.map((movie) => (
+                    <DubSeriesCard
+                      key={movie.id}
+                      series={movie}
+                      onSelectSeries={(s) => setSelectedDubForDetail(s)}
+                      onQuickPlay={(ep, s) => setActiveVideoSession({ episode: ep, series: s })}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Section 3: Anime Showcase & Grid (عالم الأنمي) */}
+            {allAnimeWorks.length > 0 && (
+              <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div className="flex items-end justify-between mb-6 pb-4 border-b border-white/10">
+                  <div>
+                    <div className="text-xs text-rose-300 font-bold mb-1">
+                      أنمي مترجم ومدبلج
+                    </div>
+                    <h2 className="text-2xl sm:text-3xl font-black text-white">
+                      مسلسلات الأنمي
+                    </h2>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCurrentTab('anime');
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    className="text-xs sm:text-sm font-bold text-white/70 hover:text-white flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    <span>قسم الأنمي</span>
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
+                  {allAnimeWorks.map((anime) => (
+                    <DubSeriesCard
+                      key={anime.id}
+                      series={anime}
+                      onSelectSeries={(s) => setSelectedDubForDetail(s)}
+                      onQuickPlay={(ep, s) => setActiveVideoSession({ episode: ep, series: s })}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Section 4: TV Series Section (المسلسلات التلفزيونية) */}
+            <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+              <div className="flex items-end justify-between mb-6 pb-4 border-b border-white/10">
+                <div>
+                  <div className="text-xs text-sky-300 font-bold mb-1">
+                    مسلسلات عالمية ودرامية
+                  </div>
+                  <h2 className="text-2xl sm:text-3xl font-black text-white">
+                    المسلسلات التلفزيونية
+                  </h2>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCurrentTab('tv');
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  className="text-xs sm:text-sm font-bold text-white/70 hover:text-white flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  <span>تصفح القسم</span>
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+              </div>
+
+              {allTvWorks.length > 0 ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
+                  {allTvWorks.map((series) => (
+                    <DubSeriesCard
+                      key={series.id}
+                      series={series}
+                      onSelectSeries={(s) => setSelectedDubForDetail(s)}
+                      onQuickPlay={(ep, s) => setActiveVideoSession({ episode: ep, series: s })}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div
+                  onClick={() => {
+                    setCurrentTab('tv');
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  className="rounded-3xl border border-white/10 hover:border-sky-400/40 bg-white/[0.03] backdrop-blur-xl p-6 sm:p-8 flex flex-col sm:flex-row items-center justify-between gap-4 cursor-pointer transition-colors"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-2xl bg-sky-500/15 border border-sky-400/30 flex items-center justify-center text-sky-300 shrink-0">
+                      <MonitorPlay className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h3 className="text-base sm:text-lg font-black text-white">
+                        المسلسلات التلفزيونية (جاهز لاستقبال مسلسلات مثل Game of Thrones)
+                      </h3>
+                      <p className="text-xs text-white/60 mt-0.5">
+                        قسم مستقل لمتابعة المسلسلات التلفزيونية العالمية بمواسمها وحلقاتها الكاملة
+                      </p>
+                    </div>
+                  </div>
+                  <span className="px-5 py-2.5 rounded-full bg-white/10 hover:bg-white/20 border border-white/25 text-white font-bold text-xs whitespace-nowrap shrink-0">
+                    فتح القسم
+                  </span>
+                </div>
+              )}
+            </section>
+
+            {/* Section 5: Comics Library (مكتبة الكوميكس) */}
+            <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+              <div className="flex items-end justify-between mb-6 pb-4 border-b border-white/10">
+                <div>
+                  <div className="text-xs text-emerald-300 font-bold mb-1">
+                    قراءة تفاعلية عالية الدقة
+                  </div>
+                  <h2 className="text-2xl sm:text-3xl font-black text-white">
+                    الكوميكس والمانجا المترجمة
+                  </h2>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCurrentTab('comics');
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  className="text-xs sm:text-sm font-bold text-white/70 hover:text-white flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  <span>مكتبة الكوميكس</span>
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
                 {COMICS_DATA.map((comic) => (
                   <ComicCard
                     key={comic.id}
@@ -494,209 +556,6 @@ export default function App() {
                 ))}
               </div>
             </section>
-
-            {/* Section 2: Latest Dubbed Shows (أحدث الأعمال المدبلجة مع المواسم والحلقات) */}
-            <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-              <div className="flex items-end justify-between mb-8 pb-4 border-b border-neutral-800">
-                <div>
-                  <div className="flex items-center gap-2 text-xs text-amber-500 font-bold uppercase tracking-wider mb-1">
-                    <Tv className="w-4 h-4" />
-                    <span>أداء صوتي عربي</span>
-                  </div>
-                  <h2 className="text-2xl sm:text-3xl font-black text-white">
-                    الأعمال والمسلسلات المدبلجة
-                  </h2>
-                </div>
-
-                <button
-                  onClick={() => setCurrentTab('dubbed')}
-                  className="text-xs sm:text-sm font-bold text-neutral-400 hover:text-white flex items-center gap-1 transition-colors cursor-pointer"
-                >
-                  <span>عرض جميع الأعمال المدبلجة</span>
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-              </div>
-
-              {/* Grid of Dubbed Series */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
-                {allDubbedWorks.map((series) => (
-                  <DubSeriesCard
-                    key={series.id}
-                    series={series}
-                    onSelectSeries={(s) => setSelectedDubForDetail(s)}
-                    onQuickPlay={(ep, s) => setActiveVideoSession({ episode: ep, series: s })}
-                  />
-                ))}
-              </div>
-            </section>
-
-            {/* Section 3: Anime Showcase (قسم الأنمي المخصص: الزهرة تزهر بالكرامة) */}
-            <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-              <div className="flex items-end justify-between mb-8 pb-4 border-b border-neutral-800">
-                <div>
-                  <div className="flex items-center gap-2 text-xs text-rose-500 font-bold uppercase tracking-wider mb-1">
-                    <Tv className="w-4 h-4" />
-                    <span>أنمي مترجم ومدبلج</span>
-                  </div>
-                  <h2 className="text-2xl sm:text-3xl font-black text-white">
-                    قسم الأنمي المميز
-                  </h2>
-                </div>
-
-                <button
-                  onClick={() => setCurrentTab('anime')}
-                  className="text-xs sm:text-sm font-bold text-rose-400 hover:text-rose-300 flex items-center gap-1 transition-colors cursor-pointer"
-                >
-                  <span>عرض جميع مسلسلات وحلقات الأنمي</span>
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-              </div>
-
-              {/* Anime Featured Banner */}
-              <div className="relative rounded-3xl overflow-hidden border-2 border-rose-500/40 bg-gradient-to-r from-neutral-900 via-neutral-900 to-rose-950/30 p-6 sm:p-8 shadow-2xl">
-                <div className="flex flex-col lg:flex-row items-center gap-6 sm:gap-8">
-                  <div
-                    onClick={() => setCurrentTab('anime')}
-                    className="w-40 sm:w-56 aspect-[2/3] rounded-2xl overflow-hidden shrink-0 shadow-2xl border-2 border-rose-500/50 cursor-pointer group bg-neutral-950 relative"
-                  >
-                    <img
-                      src={ANIME_WORKS[0].coverImage}
-                      alt={ANIME_WORKS[0].title}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                      referrerPolicy="no-referrer"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-neutral-950/80 via-transparent to-transparent" />
-                    <div className="absolute top-2 right-2 bg-rose-600 text-white font-mono text-[10px] font-bold px-2 py-0.5 rounded-full shadow">
-                      أنمي جديد
-                    </div>
-                  </div>
-
-                  <div className="flex-1 text-right">
-                    <div className="flex flex-wrap items-center gap-2 mb-2">
-                      <span className="text-xs font-mono font-bold px-2.5 py-0.5 rounded-full bg-rose-600 text-white">
-                        {ANIME_WORKS[0].genres[0]}
-                      </span>
-                      <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-neutral-800 text-amber-400 border border-neutral-700">
-                        ★ {ANIME_WORKS[0].rating}
-                      </span>
-                      <span className="text-xs font-mono text-neutral-400">
-                        {ANIME_WORKS[0].episodesCount} حلقة كاملة
-                      </span>
-                      <span className="text-xs text-neutral-400 font-mono">
-                        {ANIME_WORKS[0].dubStudio}
-                      </span>
-                    </div>
-
-                    <h3 className="text-2xl sm:text-3xl font-black text-white mb-2">
-                      {ANIME_WORKS[0].title}
-                    </h3>
-                    <p className="text-xs sm:text-sm text-neutral-300 leading-relaxed mb-6 max-w-2xl line-clamp-3">
-                      {ANIME_WORKS[0].synopsis}
-                    </p>
-
-                    <div className="flex flex-wrap items-center gap-3">
-                      <button
-                        onClick={() => {
-                          const ep1 = ANIME_WORKS[0].episodes[0];
-                          setActiveVideoSession({ episode: ep1, series: ANIME_WORKS[0] });
-                        }}
-                        className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs sm:text-sm rounded-xl shadow-lg shadow-rose-950 flex items-center gap-2 transition-all cursor-pointer hover:scale-105 active:scale-95"
-                      >
-                        <Play className="w-4 h-4 fill-white" />
-                        <span>مشاهدة الحلقة 01 الآن</span>
-                      </button>
-
-                      <button
-                        onClick={() => setCurrentTab('anime')}
-                        className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-750 text-white font-bold text-xs sm:text-sm rounded-xl border border-neutral-700 flex items-center gap-1.5 transition-colors cursor-pointer"
-                      >
-                        <Layers className="w-4 h-4 text-rose-400" />
-                        <span>استعراض حلقات الأنمي (12)</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            {/* Section 4: Movies Showcase (قسم الأفلام السينمائية: سبايدرمان) */}
-            <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-              <div className="flex items-end justify-between mb-8 pb-4 border-b border-neutral-800">
-                <div>
-                  <div className="flex items-center gap-2 text-xs text-amber-500 font-bold uppercase tracking-wider mb-1">
-                    <Film className="w-4 h-4" />
-                    <span>صالة السينما</span>
-                  </div>
-                  <h2 className="text-2xl sm:text-3xl font-black text-white">
-                    الأفلام السينمائية
-                  </h2>
-                </div>
-
-                <button
-                  onClick={() => setCurrentTab('movies')}
-                  className="text-xs sm:text-sm font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1 transition-colors cursor-pointer"
-                >
-                  <span>عرض قسم الأفلام</span>
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-              </div>
-
-              {/* Spider-Verse Cinema Card */}
-              <div className="relative rounded-3xl overflow-hidden border-2 border-amber-500/40 bg-gradient-to-r from-neutral-900 via-neutral-900 to-amber-950/30 p-6 sm:p-8 shadow-2xl">
-                <div className="flex flex-col lg:flex-row items-center gap-6 sm:gap-8">
-                  <div
-                    onClick={() => {
-                      const ep = MOVIES_WORKS[0].episodes[0];
-                      setActiveVideoSession({ episode: ep, series: MOVIES_WORKS[0] });
-                    }}
-                    className="w-40 sm:w-56 aspect-[2/3] rounded-2xl overflow-hidden shrink-0 shadow-2xl border-2 border-amber-500/50 cursor-pointer group bg-neutral-950 relative"
-                  >
-                    <img
-                      src={MOVIES_WORKS[0].coverImage}
-                      alt={MOVIES_WORKS[0].title}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                      referrerPolicy="no-referrer"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-neutral-950/80 via-transparent to-transparent" />
-                    <div className="absolute top-2 right-2 bg-amber-500 text-neutral-950 font-mono text-[10px] font-black px-2 py-0.5 rounded-full shadow">
-                      فيلم كامل
-                    </div>
-                  </div>
-
-                  <div className="flex-1 text-right">
-                    <div className="flex flex-wrap items-center gap-2 mb-2">
-                      <span className="text-xs font-mono font-bold px-2.5 py-0.5 rounded-full bg-amber-500 text-neutral-950">
-                        {MOVIES_WORKS[0].genres[0]}
-                      </span>
-                      <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-neutral-800 text-amber-400 border border-neutral-700">
-                        ★ {MOVIES_WORKS[0].rating}
-                      </span>
-                      <span className="text-xs font-mono text-neutral-400">
-                        المدة: 02:20:00
-                      </span>
-                    </div>
-
-                    <h3 className="text-2xl sm:text-3xl font-black text-white mb-2">
-                      {MOVIES_WORKS[0].title}
-                    </h3>
-                    <p className="text-xs sm:text-sm text-neutral-300 leading-relaxed mb-6 max-w-2xl line-clamp-3">
-                      {MOVIES_WORKS[0].synopsis}
-                    </p>
-
-                    <button
-                      onClick={() => {
-                        const ep = MOVIES_WORKS[0].episodes[0];
-                        setActiveVideoSession({ episode: ep, series: MOVIES_WORKS[0] });
-                      }}
-                      className="px-6 py-2.5 bg-amber-500 hover:bg-amber-400 text-neutral-950 font-black text-xs sm:text-sm rounded-xl shadow-lg shadow-amber-950 flex items-center gap-2 transition-all cursor-pointer hover:scale-105 active:scale-95"
-                    >
-                      <Play className="w-4 h-4 fill-neutral-950" />
-                      <span>مشاهدة الفيلم السينمائي الآن</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </section>
           </div>
         )}
 
@@ -707,7 +566,6 @@ export default function App() {
             onPlayEpisode={(ep, s) => setActiveVideoSession({ episode: ep, series: s })}
             onOpenAdmin={() => setIsAdminOpen(true)}
             isOwnerAdmin={isOwnerAdmin}
-            onOpenCreateWork={() => setCreateWorkCategory('anime')}
           />
         )}
 
@@ -718,60 +576,71 @@ export default function App() {
             onPlayEpisode={(ep, s) => setActiveVideoSession({ episode: ep, series: s })}
             onOpenAdmin={() => setIsAdminOpen(true)}
             isOwnerAdmin={isOwnerAdmin}
-            onOpenCreateWork={() => setCreateWorkCategory('movie')}
+          />
+        )}
+
+        {/* VIEW: TV SERIES SECTION PAGE */}
+        {currentTab === 'tv' && (
+          <TvSeriesView
+            onSelectSeries={(s) => setSelectedDubForDetail(s)}
+            onPlayEpisode={(ep, s) => setActiveVideoSession({ episode: ep, series: s })}
+            onOpenAdmin={() => setIsAdminOpen(true)}
+            isOwnerAdmin={isOwnerAdmin}
+            onOpenCreateWork={
+              isOwnerAdmin ? () => setCreateWorkCategory('tv') : undefined
+            }
           />
         )}
 
         {/* VIEW: COMICS CATALOG & READER PAGE */}
         {currentTab === 'comics' && (
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
-            {/* Header banner */}
-            <div className="border-b border-neutral-800 pb-6 flex flex-col md:flex-row md:items-end justify-between gap-4">
+            <div className="border-b border-white/10 pb-6 flex flex-col md:flex-row md:items-end justify-between gap-4">
               <div>
-                <span className="text-xs font-bold text-rose-500 font-mono tracking-wider">
+                <span className="text-xs font-bold text-violet-300 tracking-wider">
                   مكتبة الكوميكس التفاعلية
                 </span>
                 <h1 className="text-3xl sm:text-4xl font-black text-white mt-1">
                   قسم الكوميكس والمانجا المترجمة
                 </h1>
-                <p className="text-sm text-neutral-400 mt-1 max-w-xl">
+                <p className="text-sm text-white/65 mt-1 max-w-xl">
                   تصفح فصول الكوميكس الكاملة، كل سلسلة تمتلك صفحاتها وفصولها وغلافها المستقل دون اختلاط.
                 </p>
               </div>
 
-              {/* Search input */}
               <div className="relative w-full md:w-72">
-                <Search className="w-4 h-4 text-neutral-500 absolute top-1/2 right-3 -translate-y-1/2" />
+                <Search className="w-4 h-4 text-white/45 absolute top-1/2 right-3 -translate-y-1/2" />
                 <input
                   type="text"
                   placeholder="ابحث عن اسم العمل أو المؤلف..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full bg-neutral-900 border border-neutral-800 text-white text-xs rounded-xl py-2.5 pr-9 pl-3 focus:outline-none focus:border-rose-500 transition-colors"
+                  className="w-full bg-white/[0.04] border border-white/15 text-white text-xs rounded-full py-2.5 pr-9 pl-4 focus:outline-none focus:border-violet-400 transition-colors"
                 />
               </div>
             </div>
 
-            {/* Quick Filter tabs */}
             <div className="flex items-center gap-2 overflow-x-auto pb-2">
               <button
+                type="button"
                 onClick={() => setSelectedGenre('all')}
-                className={`px-3.5 py-1.5 text-xs font-bold rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
+                className={`px-4 py-1.5 text-xs font-bold rounded-full transition-colors whitespace-nowrap cursor-pointer border ${
                   selectedGenre === 'all'
-                    ? 'bg-rose-600 text-white shadow-md shadow-rose-950'
-                    : 'bg-neutral-900 text-neutral-400 hover:text-white border border-neutral-800'
+                    ? 'bg-white text-slate-950 border-white'
+                    : 'bg-white/[0.05] text-white/70 hover:text-white border-white/10'
                 }`}
               >
                 جميع الأعمال
               </button>
               {['مغامرات', 'فانتازيا وخيال', 'رعب نفسي', 'كوميديا سوداء'].map((genre) => (
                 <button
+                  type="button"
                   key={genre}
                   onClick={() => setSelectedGenre(genre)}
-                  className={`px-3.5 py-1.5 text-xs font-bold rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
+                  className={`px-4 py-1.5 text-xs font-bold rounded-full transition-colors whitespace-nowrap cursor-pointer border ${
                     selectedGenre === genre
-                      ? 'bg-rose-600 text-white shadow-md shadow-rose-950'
-                      : 'bg-neutral-900 text-neutral-400 hover:text-white border border-neutral-800'
+                      ? 'bg-white text-slate-950 border-white'
+                      : 'bg-white/[0.05] text-white/70 hover:text-white border-white/10'
                   }`}
                 >
                   {genre}
@@ -779,8 +648,7 @@ export default function App() {
               ))}
             </div>
 
-            {/* Comics Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
               {filteredComics.map((comic) => (
                 <ComicCard
                   key={comic.id}
@@ -798,48 +666,47 @@ export default function App() {
         {/* VIEW: DUBBED WORKS & HIERARCHICAL SERIES NAVIGATION */}
         {currentTab === 'dubbed' && (
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-10">
-            {/* Header */}
-            <div className="border-b border-neutral-800 pb-6 flex flex-col md:flex-row md:items-end justify-between gap-4">
+            <div className="border-b border-white/10 pb-6 flex flex-col md:flex-row md:items-end justify-between gap-4">
               <div>
-                <span className="text-xs font-bold text-amber-500 font-mono tracking-wider">
-                  قسم الدبلجة الصوتية
+                <span className="text-xs font-bold text-violet-300 tracking-wider">
+                  قسم الأنميشن والكرتون
                 </span>
                 <h1 className="text-3xl sm:text-4xl font-black text-white mt-1">
-                  الأعمال والمسلسلات الكرتونية المدبلجة
+                  قسم الأنميشن والكرتون
                 </h1>
-                <p className="text-sm text-neutral-400 mt-1 max-w-xl">
-                  اختر المسلسل، تصفح مواسمه وفصوله، ثم استعرض قائمة الحلقات وشاهد الفيديو بجودة عالية ومؤثرات صوتية متقنة.
+                <p className="text-sm text-white/65 mt-1 max-w-xl">
+                  اختر المسلسل لاستعراض العرض الزجاجي، المواسم، والحلقات الكاملة بأعلى جودة.
                 </p>
               </div>
 
               <div className="flex flex-wrap items-center gap-3">
                 {isOwnerAdmin && (
                   <button
-                    onClick={() => setCreateWorkCategory('dubbed')}
-                    className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-lg shadow-rose-950/50 transition-all cursor-pointer"
+                    type="button"
+                    onClick={() => setIsAdminOpen(true)}
+                    className="px-4 py-2 bg-white/[0.06] hover:bg-white/[0.12] text-white border border-white/15 rounded-full text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
                   >
-                    <Plus className="w-4 h-4" />
-                    <span>إضافة مسلسل مدبلج جديد (للمالك)</span>
+                    <ShieldCheck className="w-4 h-4 text-violet-300" />
+                    <span>إدارة المسلسلات والروابط</span>
                   </button>
                 )}
 
-                <div className="flex items-center gap-2 text-xs text-neutral-400 bg-neutral-900 border border-neutral-800 px-3.5 py-2 rounded-xl">
-                  <Volume2 className="w-4 h-4 text-amber-500" />
+                <span className="text-xs text-white/65 flex items-center gap-1.5">
+                  <Volume2 className="w-4 h-4 text-amber-300" />
                   <span>دبلجة رسمية باللغة العربية الفصحى</span>
-                </div>
+                </span>
               </div>
             </div>
 
-            {/* Standalone Series Cards Grid (كما تم عمله في الكوميكس تماماً) */}
             <div>
               <div className="mb-4">
                 <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                  <Film className="w-4 h-4 text-rose-500" />
-                  <span>المسلسلات المتاحة (اضغط على المسلسل لاستعراض مواسمه وحلقاته)</span>
+                  <Film className="w-4 h-4 text-violet-300" />
+                  <span>المسلسلات المتاحة (اضغط على المسلسل لفتحه)</span>
                 </h2>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
                 {allDubbedWorks.map((series) => (
                   <DubSeriesCard
                     key={series.id}
@@ -851,56 +718,66 @@ export default function App() {
               </div>
             </div>
 
-            {/* Featured Section for "خلف حائط الحديقة" inside Dubbed tab */}
-            <div className="bg-gradient-to-br from-neutral-900 to-neutral-950 p-6 sm:p-8 rounded-3xl border border-neutral-800">
-              <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-3">
-                  <div className="w-2.5 h-6 bg-rose-600 rounded-full" />
+            {featuredDubSeries && (
+              <div className="bg-white/[0.03] backdrop-blur-xl p-6 sm:p-8 rounded-3xl border border-white/10">
+                <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
                   <div>
                     <h3 className="text-xl font-bold text-white">
-                      حلقات مسلسل «{gardenWallSeries.title}» - الموسم الأول
+                      حلقات مسلسل «{featuredDubSeries.title}» - {featuredDubSeries.seasons[0]?.title || 'الموسم الأول'}
                     </h3>
-                    <p className="text-xs text-neutral-400">
-                      الحلقة الأولى متوفرة للمشاهدة الآن، والحلقات الأخرى قيد التجهيز والدبلجة (قريباً).
+                    <p className="text-xs text-white/60 mt-0.5">
+                      اضغط على أي حلقة للمشاهدة الفورية أو استعرض جميع المواسم والحلقات.
                     </p>
                   </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDubForDetail(featuredDubSeries)}
+                    className="text-xs font-bold text-violet-300 hover:text-white flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    <span>استعراض تفاصيل المسلسل</span>
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
                 </div>
 
-                <button
-                  onClick={() => setSelectedDubForDetail(gardenWallSeries)}
-                  className="text-xs font-bold text-rose-500 hover:text-rose-400 flex items-center gap-1 transition-colors cursor-pointer"
-                >
-                  <span>استعراض تفاصيل المسلسل والمواسم</span>
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {featuredDubSeries.episodes.map((ep) => (
+                    <DubCard
+                      key={ep.id}
+                      episode={ep}
+                      series={featuredDubSeries}
+                      onPlay={(e, s) => setActiveVideoSession({ episode: e, series: s })}
+                      onSelectSeries={(s) => setSelectedDubForDetail(s)}
+                    />
+                  ))}
+                </div>
               </div>
-
-              {/* Episodes Grid for Over the Garden Wall */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                {gardenWallSeries.episodes.map((ep) => (
-                  <DubCard
-                    key={ep.id}
-                    episode={ep}
-                    series={gardenWallSeries}
-                    onPlay={(e, s) => setActiveVideoSession({ episode: e, series: s })}
-                    onSelectSeries={(s) => setSelectedDubForDetail(s)}
-                  />
-                ))}
-              </div>
-            </div>
+            )}
           </div>
         )}
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-neutral-900 bg-neutral-950 py-10">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-6 text-xs text-neutral-500">
+      <footer
+        className={`border-t py-10 ${
+          siteStyleMeta.isLight
+            ? 'border-neutral-300/80 bg-[#ede7dd] text-neutral-700'
+            : 'border-white/10 bg-[#050810]'
+        }`}
+      >
+        <div
+          className={`max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-6 text-xs ${
+            siteStyleMeta.isLight ? 'text-neutral-600' : 'text-white/55'
+          }`}
+        >
           <div className="flex items-center gap-3">
-            <div className="w-7 h-7 rounded-lg bg-rose-600 flex items-center justify-center text-white font-mono font-bold text-xs">
-              AV
-            </div>
+            <BrandLogo size="xs" />
             <span>
-              منصة <strong className="text-neutral-300">AniVerse</strong> لعرض الكوميكس والأعمال المدبلجة. جميع حقوق الترجمة والرسم محفوظة لمبدعيها.
+              منصة{' '}
+              <strong className={siteStyleMeta.isLight ? 'text-neutral-950' : 'text-white/85'}>
+                AniVerse
+              </strong>{' '}
+              لعرض الكوميكس والأنميشن والكرتون. جميع حقوق الترجمة والرسم محفوظة لمبدعيها.
             </span>
           </div>
 
@@ -924,10 +801,16 @@ export default function App() {
               الأفلام
             </button>
             <button
+              onClick={() => setCurrentTab('tv')}
+              className="hover:text-sky-400 transition-colors cursor-pointer text-sky-300/90 font-medium"
+            >
+              المسلسلات التلفزيونية
+            </button>
+            <button
               onClick={() => setCurrentTab('dubbed')}
               className="hover:text-neutral-300 transition-colors cursor-pointer"
             >
-              الأعمال المدبلجة
+              الأنميشن والكرتون
             </button>
             <button
               onClick={() => setCurrentTab('comics')}
@@ -935,6 +818,8 @@ export default function App() {
             >
               الكوميكس
             </button>
+
+            <PWAInstallButton variant="footer" />
 
             {/* Hidden / Discreet Admin Gateway in Footer */}
             <button
@@ -962,9 +847,9 @@ export default function App() {
       )}
 
       {/* Dubbed Series Detail Modal - Shows series info, seasons list, and episodes */}
-      {selectedDubForDetail && (
+      {liveSelectedDub && (
         <DubSeriesDetailModal
-          series={selectedDubForDetail}
+          series={liveSelectedDub}
           onClose={() => setSelectedDubForDetail(null)}
           onPlayEpisode={(ep, ser) => {
             setActiveVideoSession({ episode: ep, series: ser });
@@ -973,23 +858,23 @@ export default function App() {
       )}
 
       {/* Embedded Cinema Video Player Modal (Pure Cinema for Viewer) */}
-      {activeVideoSession && (
+      {liveActiveVideoEpisode && liveActiveVideoSeries && (
         <VideoPlayerModal
-          episode={activeVideoSession.episode}
-          seriesTitle={activeVideoSession.series.title}
+          episode={liveActiveVideoEpisode}
+          seriesTitle={liveActiveVideoSeries.title}
           allEpisodes={
-            activeVideoSession.series.seasons && activeVideoSession.series.seasons.length > 0
-              ? activeVideoSession.series.seasons.flatMap((s) => s.episodes || [])
-              : activeVideoSession.series.episodes
+            liveActiveVideoSeries.seasons && liveActiveVideoSeries.seasons.length > 0
+              ? liveActiveVideoSeries.seasons.flatMap((s) => s.episodes || [])
+              : liveActiveVideoSeries.episodes
           }
           onSelectEpisode={(newEp) =>
             setActiveVideoSession({
               episode: newEp,
-              series: activeVideoSession.series,
+              series: liveActiveVideoSeries,
             })
           }
           onClose={() => setActiveVideoSession(null)}
-          onOpenAdmin={() => setIsAdminOpen(true)}
+          onOpenAdmin={isOwnerAdmin ? () => setIsAdminOpen(true) : undefined}
         />
       )}
 
@@ -1007,7 +892,7 @@ export default function App() {
         />
       )}
 
-      {/* Admin Media Dashboard Modal (Hidden from Regular Viewers) */}
+      {/* Admin Media Dashboard Modal (Strictly Locked to Owner Email) */}
       <AdminMediaDashboard
         isOpen={isAdminOpen}
         onClose={() => {
@@ -1018,14 +903,48 @@ export default function App() {
           adminPreselect.seriesId || activeVideoSession?.series.id || selectedDubForDetail?.id
         }
         initialEpisodeId={adminPreselect.episodeId || activeVideoSession?.episode.id}
-        onOpenCreateWork={() => {
-          const defaultCat: CustomWorkCategory =
-            currentTab === 'movies' ? 'movie' : currentTab === 'dubbed' ? 'dubbed' : 'anime';
-          setCreateWorkCategory(defaultCat);
+        onOpenCreateWork={
+          isOwnerAdmin
+            ? () => {
+                const defaultCat: CustomWorkCategory =
+                  currentTab === 'movies'
+                    ? 'movie'
+                    : currentTab === 'tv'
+                    ? 'tv'
+                    : currentTab === 'dubbed'
+                    ? 'dubbed'
+                    : 'anime';
+                setCreateWorkCategory(defaultCat);
+              }
+            : undefined
+        }
+      />
+
+      {/* Global Search & Genre Explorer Modal */}
+      <GlobalSearchModal
+        isOpen={isSearchModalOpen}
+        onClose={() => setIsSearchModalOpen(false)}
+        onSelectMedia={(series) => setSelectedDubForDetail(series)}
+        onSelectComic={(comic) => setSelectedComicForDetail(comic)}
+        onNavigateTab={(tab) => {
+          setCurrentTab(tab);
+          window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
       />
 
-      {/* Owner-Only Add/Edit Custom Work Modal (Anime, Movies, Dubbed) */}
+      {/* Interactive Style Selector Modal ("الأنماط") */}
+      <StyleSelectorModal
+        isOpen={isStyleModalOpen}
+        currentStyleId={siteStyleId}
+        onSelectStyle={(next) => setSiteStyleId(next)}
+        onClose={() => setIsStyleModalOpen(false)}
+        sampleCovers={allEffectiveMedia
+          .slice(0, 4)
+          .map((w) => w.coverImage || w.bannerImage)
+          .filter(Boolean)}
+      />
+
+      {/* Owner-Only Add/Edit Custom Work Modal (Opened strictly from Admin Panel by verified owner) */}
       {isOwnerAdmin && (
         <AdminCreateWorkModal
           isOpen={createWorkCategory !== null}
@@ -1037,6 +956,8 @@ export default function App() {
           }}
         />
       )}
+
+      <OfflineIndicator />
     </div>
   );
 }

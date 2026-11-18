@@ -26,7 +26,7 @@ import {
   Eye,
   EyeOff
 } from 'lucide-react';
-import { DUBBED_WORKS, ANIME_WORKS, MOVIES_WORKS, ALL_MEDIA_WORKS, DubSeries, DubEpisode } from '../data/mockData.ts';
+import { ALL_MEDIA_WORKS } from '../data/mockData.ts';
 import {
   extractDriveFileId,
   isGoogleDriveSource,
@@ -51,6 +51,7 @@ import {
 import { User } from 'firebase/auth';
 import {
   ADMIN_EMAIL,
+  isFirestoreOfflineError,
   isVerifiedAdminUser,
   signInWithGoogleAdmin,
   signOutAdmin,
@@ -58,8 +59,17 @@ import {
 } from '../firebase.ts';
 import {
   CUSTOM_WORKS_UPDATED_EVENT,
-  getCustomSeriesByCategory,
+  formatCloudErrorMessage,
 } from '../utils/customWorks.ts';
+import {
+  CATALOG_OVERRIDES_UPDATED_EVENT,
+  getAllEffectiveMediaWorks,
+  getEffectiveWorksByCategory,
+} from '../utils/catalogOverrides.ts';
+import {
+  AdminCatalogManager,
+  AdminEpisodeListManager,
+} from './AdminCatalogEpisodeManager.tsx';
 import {
   AccessGateConfig,
   clearStoredAccessUnlock,
@@ -84,7 +94,7 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
   onOpenCreateWork,
 }) => {
   const [selectedSeriesId, setSelectedSeriesId] = useState<string>(
-    initialSeriesId || ALL_MEDIA_WORKS[0].id
+    initialSeriesId || ALL_MEDIA_WORKS[0]?.id || ''
   );
   const [selectedEpisodeId, setSelectedEpisodeId] = useState<string>('');
   const [driveInputLink, setDriveInputLink] = useState<string>('');
@@ -93,8 +103,11 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
   const [arabicVttInput, setArabicVttInput] = useState<string>('/subtitles/arabic.vtt');
   const [englishVttInput, setEnglishVttInput] = useState<string>('/subtitles/english.vtt');
   const [customTracks, setCustomTracks] = useState<SubtitleTrack[]>([]);
-  const [activeTab, setActiveTab] = useState<'editor' | 'overview' | 'backup' | 'security'>('editor');
+  const [activeTab, setActiveTab] = useState<
+    'editor' | 'catalog' | 'episodes' | 'overview' | 'backup' | 'security'
+  >('editor');
   const [saveToast, setSaveToast] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [testPlayActive, setTestPlayActive] = useState<boolean>(false);
   const [backupJson, setBackupJson] = useState<string>('');
   const [importStatus, setImportStatus] = useState<string | null>(null);
@@ -120,18 +133,15 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
     const handleUpdate = () => setVersionTick((v) => v + 1);
     window.addEventListener(SOURCES_UPDATED_EVENT, handleUpdate);
     window.addEventListener(CUSTOM_WORKS_UPDATED_EVENT, handleUpdate);
+    window.addEventListener(CATALOG_OVERRIDES_UPDATED_EVENT, handleUpdate);
     const unsubAuth = subscribeAuthState((user, ready) => {
       setAuthUser(user);
       setAuthReady(ready);
-      if (user && isVerifiedAdminUser(user)) {
-        void syncAllLocalSourcesToCloud().catch((err) => {
-          console.error('Auto cloud migration error:', err);
-        });
-      }
     });
     return () => {
       window.removeEventListener(SOURCES_UPDATED_EVENT, handleUpdate);
       window.removeEventListener(CUSTOM_WORKS_UPDATED_EVENT, handleUpdate);
+      window.removeEventListener(CATALOG_OVERRIDES_UPDATED_EVENT, handleUpdate);
       unsubAuth();
     };
   }, []);
@@ -139,8 +149,19 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
   useEffect(() => {
     if (isOpen && initialSeriesId) {
       setSelectedSeriesId(initialSeriesId);
+      setActiveTab('editor');
     }
     if (isOpen) {
+      setSaveError(null);
+      if (authUser && isVerifiedAdminUser(authUser)) {
+        void syncAllLocalSourcesToCloud({ silentOffline: true }).catch((err) => {
+          if (isFirestoreOfflineError(err)) {
+            console.warn('Auto cloud migration deferred while offline.');
+          } else {
+            console.error('Auto cloud migration error:', err);
+          }
+        });
+      }
       void fetchAccessGateConfig()
         .then((cfg) => {
           setGateConfig(cfg);
@@ -151,45 +172,48 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
           // Keep default config UI on offline/read errors
         });
     }
-  }, [isOpen, initialSeriesId]);
+  }, [isOpen, initialSeriesId, initialEpisodeId, authUser]);
 
-  const dynamicAnimeWorks = [...ANIME_WORKS, ...getCustomSeriesByCategory('anime')];
-  const dynamicMovieWorks = [...MOVIES_WORKS, ...getCustomSeriesByCategory('movie')];
-  const dynamicDubbedWorks = [...DUBBED_WORKS, ...getCustomSeriesByCategory('dubbed')];
-  const dynamicAllMediaWorks = [
-    ...dynamicDubbedWorks,
-    ...dynamicAnimeWorks,
-    ...dynamicMovieWorks,
-  ];
+  const dynamicAnimeWorks = getEffectiveWorksByCategory('anime');
+  const dynamicMovieWorks = getEffectiveWorksByCategory('movie');
+  const dynamicTvWorks = getEffectiveWorksByCategory('tv');
+  const dynamicDubbedWorks = getEffectiveWorksByCategory('dubbed');
+  const dynamicAllMediaWorks = getAllEffectiveMediaWorks();
 
   const selectedSeries =
     dynamicAllMediaWorks.find((s) => s.id === selectedSeriesId) || dynamicAllMediaWorks[0];
   const allEpisodes = React.useMemo(() => {
     if (!selectedSeries) return [];
     if (selectedSeries.seasons && selectedSeries.seasons.length > 0) {
-      return selectedSeries.seasons.flatMap((s) => s.episodes || []);
+      return selectedSeries.seasons.flatMap((s) => (s?.episodes || []).filter(Boolean));
     }
-    return selectedSeries.episodes || [];
+    return (selectedSeries.episodes || []).filter(Boolean);
   }, [selectedSeries]);
 
   // Initialize selected episode
   useEffect(() => {
-    if (initialEpisodeId && allEpisodes.some((e) => e.id === initialEpisodeId)) {
+    if (initialEpisodeId && allEpisodes.some((e) => e?.id === initialEpisodeId)) {
       setSelectedEpisodeId(initialEpisodeId);
-    } else if (allEpisodes.length > 0 && !allEpisodes.some((e) => e.id === selectedEpisodeId)) {
-      setSelectedEpisodeId(allEpisodes[0].id);
+    } else if (allEpisodes.length > 0 && !allEpisodes.some((e) => e?.id === selectedEpisodeId)) {
+      setSelectedEpisodeId(allEpisodes[0]?.id || '');
+    } else if (allEpisodes.length === 0 && selectedEpisodeId !== '') {
+      setSelectedEpisodeId('');
     }
-  }, [selectedSeriesId, initialEpisodeId, allEpisodes]);
+  }, [selectedSeriesId, initialEpisodeId, allEpisodes, selectedEpisodeId]);
 
   const currentEpisode =
-    allEpisodes.find((e) => e.id === selectedEpisodeId) || allEpisodes[0];
+    allEpisodes.find((e) => e?.id === selectedEpisodeId) || allEpisodes[0];
 
-  // Load existing configuration whenever selected episode changes
+  const currentEpisodeId = currentEpisode?.id || '';
+  const currentEpisodeFallbackDrive = currentEpisode?.driveLink || '';
+
+  // Load existing configuration only when selected episode ID or modal open state changes
   useEffect(() => {
-    if (!currentEpisode) return;
-    const saved = getCustomEpisodeSource(currentEpisode.id);
+    if (!currentEpisodeId || !isOpen) return;
+    setSaveError(null);
+    const saved = getCustomEpisodeSource(currentEpisodeId);
     if (saved) {
-      setDriveInputLink(saved.driveLink || '');
+      setDriveInputLink(saved.driveLink || saved.videoUrl || '');
       setAccountLabelInput(saved.accountLabel || '');
       setBackupLinks(Array.isArray(saved.backupDriveLinks) ? saved.backupDriveLinks : []);
       const arSub = saved.subtitles?.find((s) => s.lang === 'ar')?.src || '/subtitles/arabic.vtt';
@@ -199,7 +223,7 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
       const others = saved.subtitles?.filter((s) => s.lang !== 'ar' && s.lang !== 'en') || [];
       setCustomTracks(others);
     } else {
-      setDriveInputLink(currentEpisode.driveLink || '');
+      setDriveInputLink(currentEpisodeFallbackDrive);
       setAccountLabelInput('');
       setBackupLinks([]);
       setArabicVttInput('/subtitles/arabic.vtt');
@@ -207,7 +231,7 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
       setCustomTracks([]);
     }
     setTestPlayActive(false);
-  }, [selectedEpisodeId, currentEpisode]);
+  }, [currentEpisodeId, currentEpisodeFallbackDrive, isOpen]);
 
   if (!isOpen) return null;
 
@@ -219,8 +243,14 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentEpisode) return;
+    setSaveError(null);
 
     const trimmedLink = driveInputLink.trim();
+    if (!trimmedLink) {
+      setSaveError('يرجى وضع رابط Google Drive أو رابط الفيديو المباشر قبل الحفظ.');
+      return;
+    }
+
     const normalizedDriveLink = fileId
       ? `https://drive.google.com/uc?export=download&id=${fileId}`
       : normalizeDriveDirectUrl(trimmedLink);
@@ -254,12 +284,15 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
     setDriveInputLink(normalizedDriveLink);
     if (result.savedToCloud) {
       setSaveToast(`تم الحفظ الدائم للحلقة (${currentEpisode.title}) في سحابة Firebase للأبد بنجاح!`);
-    } else if (result.savedToServer) {
-      setSaveToast(`تم الحفظ على السيرفر المؤقت فقط — سجّل الدخول بحساب Google لحفظ الحلقة في سحابة Firebase للأبد!`);
+      setTimeout(() => setSaveToast(null), 5000);
     } else {
-      setSaveToast(`تم الحفظ في المتصفح مؤقتاً — يرجى تسجيل الدخول بحساب Google للحفظ الدائم في السحابة.`);
+      setSaveError(
+        formatCloudErrorMessage(
+          result.cloudError,
+          'تعذر الحفظ في سحابة Firebase الدائمة — تأكد من تسجيل الدخول بحساب المالك عبر Google.'
+        )
+      );
     }
-    setTimeout(() => setSaveToast(null), 5000);
   };
 
   const handleGoogleLogin = async () => {
@@ -268,7 +301,7 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
     try {
       const user = await signInWithGoogleAdmin();
       if (isVerifiedAdminUser(user)) {
-        const { syncedCount } = await syncAllLocalSourcesToCloud();
+        const { syncedCount } = await syncAllLocalSourcesToCloud({ silentOffline: true });
         setSaveToast(
           syncedCount > 0
             ? `تم تسجيل الدخول ورفع ${syncedCount} روابط سابقة إلى سحابة Firebase للأبد!`
@@ -277,7 +310,7 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
         setTimeout(() => setSaveToast(null), 4500);
       }
     } catch (err) {
-      setAuthError(err instanceof Error ? err.message : 'تعذر تسجيل الدخول عبر Google');
+      setAuthError(formatCloudErrorMessage(err, 'تعذر تسجيل الدخول عبر Google'));
     } finally {
       setAuthLoading(false);
     }
@@ -295,7 +328,7 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
       );
       setTimeout(() => setSaveToast(null), 4000);
     } catch (err) {
-      setAuthError(err instanceof Error ? err.message : 'حدث خطأ أثناء المزامنة مع السحابة');
+      setAuthError(formatCloudErrorMessage(err, 'حدث خطأ أثناء المزامنة مع السحابة'));
     } finally {
       setSyncingCloud(false);
     }
@@ -406,8 +439,8 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
       <div className="relative w-full max-w-4xl bg-neutral-900 border border-neutral-700/80 rounded-2xl shadow-2xl flex flex-col my-auto max-h-[92vh] overflow-hidden text-neutral-100">
         {/* Toast */}
         {saveToast && (
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-emerald-500 text-neutral-950 font-bold px-4 py-2.5 rounded-xl shadow-2xl flex items-center gap-2 text-xs sm:text-sm animate-in fade-in">
-            <CheckCircle2 className="w-4 h-4" />
+          <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] bg-emerald-500 text-neutral-950 font-bold px-4 py-2.5 rounded-xl shadow-2xl flex items-center gap-2 text-xs sm:text-sm max-w-[92vw]">
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
             <span>{saveToast}</span>
           </div>
         )}
@@ -433,16 +466,100 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
             </div>
           </div>
 
-          <button
-            onClick={onClose}
-            className="w-8 h-8 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
-            title="إغلاق"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {isVerifiedAdminUser(authUser) && onOpenCreateWork && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenCreateWork();
+                }}
+                className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-lg shadow-rose-950/60 transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                <span>إضافة مسلسل / فيلم جديد</span>
+              </button>
+            )}
+
+            <button
+              onClick={onClose}
+              className="w-8 h-8 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+              title="إغلاق"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
-        {/* Firebase Permanent Cloud Sync & Admin Auth Bar */}
+        {/* Strict Owner-Only Email Gate */}
+        {!authReady ? (
+          <div className="p-10 flex flex-col items-center justify-center text-center gap-3 text-xs text-neutral-400">
+            <ShieldCheck className="w-8 h-8 text-rose-500 animate-pulse" />
+            <span>جاري التحقق من صلاحيات المالك...</span>
+          </div>
+        ) : !isVerifiedAdminUser(authUser) ? (
+          <div className="p-6 sm:p-10 flex flex-col items-center justify-center text-center space-y-5">
+            <div className="w-16 h-16 rounded-2xl bg-rose-600/15 border border-rose-500/30 text-rose-500 flex items-center justify-center shadow-lg">
+              <Lock className="w-8 h-8" />
+            </div>
+
+            {authUser ? (
+              <div className="space-y-2 max-w-md">
+                <h3 className="text-lg font-black text-rose-400">
+                  تم رفض الدخول — هذه اللوحة للمالك فقط
+                </h3>
+                <p className="text-xs sm:text-sm text-neutral-300 leading-relaxed">
+                  البريد الإلكتروني الحالي (<span className="font-mono text-amber-300" dir="ltr">{authUser.email}</span>) غير مصرح له بدخول لوحة المشرف. الدخول محصور بالبريد الإلكتروني للمالك الموثق فقط.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2 max-w-md">
+                <h3 className="text-lg font-black text-white">
+                  لوحة المشرف محمية — دخول المالك فقط
+                </h3>
+                <p className="text-xs sm:text-sm text-neutral-300 leading-relaxed">
+                  ممنوع دخول أي شخص آخر إلى لوحة الإدارة. لإضافة المسلسلات والأفلام أو إدارة الروابط وإعدادات القفل، يجب تسجيل الدخول بالبريد الإلكتروني الخاص بالمالك عبر Google.
+                </p>
+              </div>
+            )}
+
+            {authError && (
+              <div className="w-full max-w-md p-3 rounded-xl bg-rose-950/70 border border-rose-500/40 text-rose-200 text-xs font-bold">
+                {authError}
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              <button
+                type="button"
+                onClick={handleGoogleLogin}
+                disabled={authLoading}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs flex items-center gap-2 cursor-pointer shadow-lg shadow-rose-950/60 disabled:opacity-60"
+              >
+                <Cloud className="w-4 h-4" />
+                <span>
+                  {authLoading
+                    ? 'جاري فتح نافذة Google...'
+                    : authUser
+                    ? 'التبديل إلى حساب المالك (Google)'
+                    : 'تسجيل دخول المالك عبر Google'}
+                </span>
+              </button>
+
+              {authUser && (
+                <button
+                  type="button"
+                  onClick={() => void signOutAdmin()}
+                  className="px-4 py-2.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700 font-bold text-xs cursor-pointer"
+                >
+                  تسجيل الخروج
+                </button>
+              )}
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Firebase Permanent Cloud Sync & Admin Auth Bar */}
         <div className="px-5 py-2.5 border-b border-neutral-800 bg-neutral-900/90 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
           {!authReady ? (
             <span className="text-neutral-400">جاري التحقق من اتصال السحابة الدائمة...</span>
@@ -455,19 +572,6 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
                 </span>
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                {onOpenCreateWork && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onClose();
-                      onOpenCreateWork();
-                    }}
-                    className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-[11px] flex items-center gap-1 cursor-pointer shadow"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>إضافة عمل جديد</span>
-                  </button>
-                )}
                 <button
                   type="button"
                   onClick={handleManualCloudSync}
@@ -530,29 +634,53 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
         )}
 
         {/* Sub-nav Tabs */}
-        <div className="flex border-b border-neutral-800 bg-neutral-950/50 px-5 text-xs font-bold">
+        <div className="flex border-b border-neutral-800 bg-neutral-950/50 px-3 sm:px-5 text-xs font-bold overflow-x-auto">
           <button
             onClick={() => setActiveTab('editor')}
-            className={`py-3 px-4 border-b-2 transition-colors cursor-pointer flex items-center gap-2 ${
+            className={`py-3 px-3.5 border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
               activeTab === 'editor'
                 ? 'border-rose-500 text-rose-500'
                 : 'border-transparent text-neutral-400 hover:text-white'
             }`}
           >
             <Film className="w-4 h-4" />
-            <span>ربط وتعديل الحلقات</span>
+            <span>ربط الروابط</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('catalog')}
+            className={`py-3 px-3.5 border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+              activeTab === 'catalog'
+                ? 'border-amber-400 text-amber-400'
+                : 'border-transparent text-neutral-400 hover:text-white'
+            }`}
+          >
+            <Tv className="w-4 h-4" />
+            <span>إدارة المسلسلات والأفلام (حذف / تعديل)</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('episodes')}
+            className={`py-3 px-3.5 border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+              activeTab === 'episodes'
+                ? 'border-violet-400 text-violet-400'
+                : 'border-transparent text-neutral-400 hover:text-white'
+            }`}
+          >
+            <Layers className="w-4 h-4" />
+            <span>تعديل الحلقات والدمج</span>
           </button>
 
           <button
             onClick={() => setActiveTab('overview')}
-            className={`py-3 px-4 border-b-2 transition-colors cursor-pointer flex items-center gap-2 ${
+            className={`py-3 px-3.5 border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
               activeTab === 'overview'
                 ? 'border-rose-500 text-rose-500'
                 : 'border-transparent text-neutral-400 hover:text-white'
             }`}
           >
             <Layers className="w-4 h-4" />
-            <span>نظرة عامة على المكتبة ({Object.keys(allSavedConfigs).length} مخصصة)</span>
+            <span>نظرة عامة ({Object.keys(allSavedConfigs).length} مربوطة)</span>
           </button>
 
           <button
@@ -560,31 +688,63 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
               setActiveTab('backup');
               handleExportBackup();
             }}
-            className={`py-3 px-4 border-b-2 transition-colors cursor-pointer flex items-center gap-2 whitespace-nowrap ${
+            className={`py-3 px-3.5 border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
               activeTab === 'backup'
                 ? 'border-rose-500 text-rose-500'
                 : 'border-transparent text-neutral-400 hover:text-white'
             }`}
           >
             <Save className="w-4 h-4" />
-            <span>النسخ الاحتياطي والاستيراد</span>
+            <span>النسخ الاحتياطي</span>
           </button>
 
           <button
             onClick={() => setActiveTab('security')}
-            className={`py-3 px-4 border-b-2 transition-colors cursor-pointer flex items-center gap-2 whitespace-nowrap ${
+            className={`py-3 px-3.5 border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
               activeTab === 'security'
                 ? 'border-rose-500 text-rose-500'
                 : 'border-transparent text-neutral-400 hover:text-white'
             }`}
           >
             <Lock className="w-4 h-4" />
-            <span>رمز الدخول والقفل</span>
+            <span>رمز الدخول</span>
           </button>
         </div>
 
         {/* Tab Content */}
-        <div className="p-5 overflow-y-auto flex-1 space-y-5">
+        <div className="p-4 sm:p-5 overflow-y-auto flex-1 space-y-5">
+          {activeTab === 'catalog' && (
+            <AdminCatalogManager
+              onShowToast={(msg) => {
+                setSaveToast(msg);
+                setTimeout(() => setSaveToast(null), 4500);
+              }}
+              onJumpToEpisodes={(sid) => {
+                setSelectedSeriesId(sid);
+                setActiveTab('episodes');
+              }}
+              onOpenCreateWork={
+                onOpenCreateWork
+                  ? () => {
+                      onClose();
+                      onOpenCreateWork();
+                    }
+                  : undefined
+              }
+            />
+          )}
+
+          {activeTab === 'episodes' && (
+            <AdminEpisodeListManager
+              selectedSeriesId={selectedSeriesId}
+              onChangeSeriesId={(sid) => setSelectedSeriesId(sid)}
+              onShowToast={(msg) => {
+                setSaveToast(msg);
+                setTimeout(() => setSaveToast(null), 4500);
+              }}
+            />
+          )}
+
           {activeTab === 'editor' && (
             <div className="space-y-5">
               {/* Selectors Bar */}
@@ -601,7 +761,7 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
                     <optgroup label="🌸 قسم الأنمي">
                       {dynamicAnimeWorks.map((s) => (
                         <option key={s.id} value={s.id}>
-                          {s.title} ({s.episodes.length} حلقة)
+                          {s.title} ({s.episodesCount || (s.episodes || []).length} حلقة)
                         </option>
                       ))}
                     </optgroup>
@@ -612,10 +772,19 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
                         </option>
                       ))}
                     </optgroup>
-                    <optgroup label="🎙️ الأعمال والمسلسلات المدبلجة">
+                    {dynamicTvWorks.length > 0 && (
+                      <optgroup label="📺 المسلسلات التلفزيونية">
+                        {dynamicTvWorks.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.title} ({s.episodesCount || (s.episodes || []).length} حلقة · {(s.seasons || []).length} {(s.seasons || []).length === 1 ? 'موسم' : 'مواسم'})
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                    <optgroup label="🎬 قسم الأنميشن والكرتون">
                       {dynamicDubbedWorks.map((s) => (
                         <option key={s.id} value={s.id}>
-                          {s.title} ({s.episodesCount || s.episodes.length} حلقة · {s.seasons.length} {s.seasons.length === 1 ? 'موسم' : 'مواسم'})
+                          {s.title} ({s.episodesCount || (s.episodes || []).length} حلقة · {(s.seasons || []).length} {(s.seasons || []).length === 1 ? 'موسم' : 'مواسم'})
                         </option>
                       ))}
                     </optgroup>
@@ -623,33 +792,48 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
                 </div>
 
                 <div>
-                  <label className="text-xs font-bold text-neutral-300 block mb-1">
-                    اختر الحلقة المراد ربطها:
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-bold text-neutral-300">
+                      اختر الحلقة المراد ربطها:
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('episodes')}
+                      className="text-[11px] font-bold text-violet-400 hover:text-violet-300 underline cursor-pointer"
+                    >
+                      تعديل قائمة الحلقات / الدمج
+                    </button>
+                  </div>
                   <select
                     value={selectedEpisodeId}
                     onChange={(e) => setSelectedEpisodeId(e.target.value)}
-                    className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-rose-500 cursor-pointer"
+                    disabled={allEpisodes.length === 0}
+                    className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-rose-500 cursor-pointer disabled:opacity-60"
                   >
-                    {selectedSeries.seasons && selectedSeries.seasons.length > 1 ? (
-                      selectedSeries.seasons.map((season) => (
-                        <optgroup
-                          key={season.id}
-                          label={`📺 ${season.title} (${season.episodes.length} حلقة)`}
-                        >
-                          {season.episodes.map((ep) => {
-                            const isLinked = Boolean(allSavedConfigs[ep.id]?.driveLink);
-                            return (
-                              <option key={ep.id} value={ep.id}>
-                                الحلقة {ep.episodeNumber}: {ep.title} {isLinked ? '⭐ (مربوطة بدرايف)' : ''}
-                              </option>
-                            );
-                          })}
-                        </optgroup>
-                      ))
+                    {allEpisodes.length === 0 ? (
+                      <option value="">لا توجد حلقات في هذا العمل حالياً</option>
+                    ) : selectedSeries?.seasons && selectedSeries.seasons.length > 1 ? (
+                      selectedSeries.seasons.map((season) => {
+                        const seasonEpisodes = (season?.episodes || []).filter(Boolean);
+                        return (
+                          <optgroup
+                            key={season.id}
+                            label={`📺 ${season.title} (${seasonEpisodes.length} حلقة)`}
+                          >
+                            {seasonEpisodes.map((ep) => {
+                              const isLinked = Boolean(ep?.id && allSavedConfigs[ep.id]?.driveLink);
+                              return (
+                                <option key={ep.id} value={ep.id}>
+                                  الحلقة {ep.episodeNumber}: {ep.title} {isLinked ? '⭐ (مربوطة بدرايف)' : ''}
+                                </option>
+                              );
+                            })}
+                          </optgroup>
+                        );
+                      })
                     ) : (
                       allEpisodes.map((ep) => {
-                        const isLinked = Boolean(allSavedConfigs[ep.id]?.driveLink);
+                        const isLinked = Boolean(ep?.id && allSavedConfigs[ep.id]?.driveLink);
                         return (
                           <option key={ep.id} value={ep.id}>
                             الحلقة {ep.episodeNumber}: {ep.title} {isLinked ? '⭐ (مربوطة بدرايف)' : ''}
@@ -662,7 +846,7 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
               </div>
 
               {/* Current Episode Header Info */}
-              {currentEpisode && (
+              {currentEpisode ? (
                 <div className="flex items-center gap-3 p-3 bg-neutral-950/60 rounded-xl border border-neutral-800/80">
                   <div className="w-20 aspect-video rounded-lg overflow-hidden shrink-0 bg-neutral-800">
                     <img
@@ -696,10 +880,32 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
                     </h3>
                   </div>
                 </div>
+              ) : (
+                <div className="p-4 rounded-xl bg-amber-950/30 border border-amber-500/30 text-amber-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>
+                      لا توجد حلقات في هذا العمل حالياً لربطها. انتقل إلى «تعديل الحلقات والدمج» لإضافة حلقة جديدة أولاً.
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('episodes')}
+                    className="px-3.5 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs cursor-pointer shrink-0"
+                  >
+                    إضافة حلقة جديدة
+                  </button>
+                </div>
               )}
 
               {/* Editor Form */}
               <form onSubmit={handleSave} className="space-y-4">
+                {saveError && (
+                  <div className="p-3 rounded-xl bg-rose-950/70 border border-rose-500/40 text-rose-200 text-xs font-bold flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                    <span>{saveError}</span>
+                  </div>
+                )}
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-bold text-neutral-200 flex items-center gap-1.5">
@@ -924,13 +1130,14 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
                   <div className="flex items-center gap-2">
                     <button
                       type="submit"
-                      className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-rose-950 transition-all flex items-center gap-2 cursor-pointer hover:scale-105 active:scale-95"
+                      disabled={!currentEpisode}
+                      className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-rose-950 transition-all flex items-center gap-2 cursor-pointer hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
                     >
                       <Save className="w-4 h-4" />
                       <span>حفظ وتفعيل للحلقة فورياً</span>
                     </button>
 
-                    {allSavedConfigs[currentEpisode.id] && (
+                    {currentEpisode && allSavedConfigs[currentEpisode.id] && (
                       <button
                         type="button"
                         onClick={handleResetToDefault}
@@ -965,10 +1172,11 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
 
               <div className="space-y-4">
                 {dynamicAllMediaWorks.map((series) => {
-                  const seriesEpisodes =
+                  const seriesEpisodes = (
                     series.seasons && series.seasons.length > 0
-                      ? series.seasons.flatMap((s) => s.episodes || [])
-                      : (series.episodes || []);
+                      ? series.seasons.flatMap((s) => s?.episodes || [])
+                      : (series.episodes || [])
+                  ).filter(Boolean);
 
                   return (
                     <div
@@ -1297,6 +1505,8 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
             </div>
           )}
         </div>
+          </>
+        )}
       </div>
     </div>
   );

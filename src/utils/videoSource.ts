@@ -5,6 +5,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  getDocsFromServer,
   onSnapshot,
   query,
   serverTimestamp,
@@ -13,7 +14,14 @@ import {
   updateDoc,
   where,
 } from 'firebase/firestore';
-import { auth, db, handleFirestoreError, isVerifiedAdminUser, OperationType } from '../firebase.ts';
+import {
+  auth,
+  db,
+  handleFirestoreError,
+  isFirestoreOfflineError,
+  isVerifiedAdminUser,
+  OperationType,
+} from '../firebase.ts';
 
 // Utilities for Google Drive direct streaming, multi-language VTT subtitles, and permanent Cloud + Server storage
 export interface SubtitleTrack {
@@ -41,30 +49,30 @@ const EPISODE_SOURCES_COLLECTION = 'episodeSources';
  * - https://drive.google.com/uc?id=FILE_ID&export=download
  * - Bare FILE_ID (alphanumeric string with _ or -)
  */
+function normalizeUrlCandidate(raw: string): string {
+  const trimmed = raw.trim();
+  const urlMatch = trimmed.match(/https?:\/\/[^\s"'<>]+/i);
+  return urlMatch ? urlMatch[0] : trimmed;
+}
+
 export function extractDriveFileId(input: string): string | null {
   if (!input) return null;
-  const trimmed = input.trim();
+  const trimmed = normalizeUrlCandidate(input);
 
-  // Pattern 1: /file/d/FILE_ID
-  const fileDMatch = trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]{25,})/);
+  // Pattern 1: /file/d/FILE_ID or /file/u/0/d/FILE_ID or /d/FILE_ID
+  const fileDMatch = trimmed.match(/\/d\/([a-zA-Z0-9_-]{18,})/);
   if (fileDMatch && fileDMatch[1]) {
     return fileDMatch[1];
   }
 
-  // Pattern 2: id=FILE_ID
-  const idParamMatch = trimmed.match(/[?&]id=([a-zA-Z0-9_-]{25,})/);
+  // Pattern 2: id=FILE_ID (covers drive.google.com/open?id=, uc?id=, drive.usercontent.google.com/download?id=)
+  const idParamMatch = trimmed.match(/[?&]id=([a-zA-Z0-9_-]{18,})/);
   if (idParamMatch && idParamMatch[1]) {
     return idParamMatch[1];
   }
 
-  // Pattern 3: /open?id=FILE_ID
-  const openIdMatch = trimmed.match(/\/open\?id=([a-zA-Z0-9_-]{25,})/);
-  if (openIdMatch && openIdMatch[1]) {
-    return openIdMatch[1];
-  }
-
-  // Pattern 4: Bare ID (typically 28-44 chars of base64url characters)
-  if (/^[a-zA-Z0-9_-]{25,50}$/.test(trimmed)) {
+  // Pattern 3: Bare ID (alphanumeric/underscore/hyphen Google Drive file ID)
+  if (/^[a-zA-Z0-9_-]{18,64}$/.test(trimmed)) {
     return trimmed;
   }
 
@@ -90,11 +98,27 @@ export function isGoogleDriveSource(urlOrId: string): boolean {
  */
 export function normalizeDriveDirectUrl(fileIdOrUrl: string): string {
   if (!fileIdOrUrl) return '';
-  const fileId = extractDriveFileId(fileIdOrUrl);
+  const cleaned = normalizeUrlCandidate(fileIdOrUrl);
+  const fileId = extractDriveFileId(cleaned);
   if (fileId) {
     return `https://drive.google.com/uc?export=download&id=${fileId}`;
   }
-  return fileIdOrUrl.trim();
+  return cleaned;
+}
+
+/**
+ * Detects YouTube URLs and converts them to clean embeddable URLs if provided.
+ */
+export function getYouTubeEmbedUrl(url: string): string | null {
+  if (!url) return null;
+  const cleaned = normalizeUrlCandidate(url);
+  const match = cleaned.match(
+    /(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/
+  );
+  if (match && match[1]) {
+    return `https://www.youtube.com/embed/${match[1]}?autoplay=1&rel=0&playsinline=1`;
+  }
+  return null;
 }
 
 /**
@@ -224,28 +248,49 @@ let inMemorySources: Record<string, CustomEpisodeConfig> = {
   ...readLocalStorageSources(),
 };
 
+export function truncateUtf8(input: string, maxBytes: number): string {
+  if (!input || maxBytes <= 0) return '';
+  const encoder = new TextEncoder();
+  if (encoder.encode(input).length <= maxBytes) return input;
+  let result = '';
+  let usedBytes = 0;
+  for (const ch of input) {
+    const chBytes = encoder.encode(ch).length;
+    if (usedBytes + chBytes > maxBytes) break;
+    result += ch;
+    usedBytes += chBytes;
+  }
+  return result;
+}
+
 function sanitizeEpisodeConfigForBlueprint(config: CustomEpisodeConfig): CustomEpisodeConfig {
-  const driveLink = (config.driveLink ? normalizeDriveDirectUrl(config.driveLink) : '').slice(0, 1000);
-  const videoUrl = (config.videoUrl ? normalizeDriveDirectUrl(config.videoUrl) : driveLink).slice(0, 1000);
-  const accountLabel = (config.accountLabel || '').trim().slice(0, 120);
+  const driveLink = truncateUtf8(
+    config.driveLink ? normalizeDriveDirectUrl(config.driveLink) : '',
+    1000
+  );
+  const videoUrl = truncateUtf8(
+    config.videoUrl ? normalizeDriveDirectUrl(config.videoUrl) : driveLink,
+    1000
+  );
+  const accountLabel = truncateUtf8((config.accountLabel || '').trim(), 120);
 
   const backupDriveLinks = Array.isArray(config.backupDriveLinks)
     ? config.backupDriveLinks
         .filter((b) => b && b.url && b.url.trim())
         .slice(0, 10)
         .map((b, i) => ({
-          id: String(b.id || `backup-${Date.now()}-${i}`).slice(0, 80),
-          url: normalizeDriveDirectUrl(b.url).slice(0, 1000),
-          accountLabel: String(b.accountLabel || '').trim().slice(0, 120),
+          id: truncateUtf8(String(b.id || `backup-${Date.now()}-${i}`), 80),
+          url: truncateUtf8(normalizeDriveDirectUrl(b.url), 1000),
+          accountLabel: truncateUtf8(String(b.accountLabel || '').trim(), 120),
         }))
     : [];
 
   const subtitles = Array.isArray(config.subtitles)
     ? config.subtitles.slice(0, 10).map((s, i) => ({
-        id: String(s.id || `sub-${i}`).slice(0, 60),
-        lang: String(s.lang || 'ar').slice(0, 24),
-        label: String(s.label || 'Subtitle').slice(0, 80),
-        src: String(s.src || '').slice(0, 500),
+        id: truncateUtf8(String(s.id || `sub-${i}`), 60),
+        lang: truncateUtf8(String(s.lang || 'ar'), 24),
+        label: truncateUtf8(String(s.label || 'Subtitle'), 80),
+        src: truncateUtf8(String(s.src || ''), 500),
         default: Boolean(s.default),
       }))
     : [];
@@ -471,20 +516,51 @@ async function upsertEpisodeSourceInCloud(
 /**
  * Syncs all existing local/server episode sources to Firebase Firestore once signed in as admin.
  */
-export async function syncAllLocalSourcesToCloud(): Promise<{ syncedCount: number }> {
+export async function syncAllLocalSourcesToCloud(options?: {
+  silentOffline?: boolean;
+}): Promise<{ syncedCount: number }> {
   const user = auth.currentUser;
   if (!user || !isVerifiedAdminUser(user)) {
     return { syncedCount: 0 };
   }
 
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    if (options?.silentOffline) {
+      return { syncedCount: 0 };
+    }
+    throw new Error('تعذر المزامنة لعدم توفر اتصال بالإنترنت حالياً.');
+  }
+
   const allLocal = getAllCustomEpisodeSources();
-  const cloudExisting = await fetchEpisodeSourcesFromCloud();
+  const q = query(collection(db, EPISODE_SOURCES_COLLECTION), where('isPublic', '==', true));
+
+  const cloudExisting: Record<string, CustomEpisodeConfig> = {};
+  try {
+    const snap = await getDocsFromServer(q);
+    snap.forEach((docSnap) => {
+      cloudExisting[docSnap.id] = docDataToCustomConfig(docSnap.data());
+    });
+  } catch (error) {
+    if (options?.silentOffline && isFirestoreOfflineError(error)) {
+      console.warn('Auto cloud migration skipped while Firestore backend is unreachable.');
+      return { syncedCount: 0 };
+    }
+    handleFirestoreError(error, OperationType.LIST, EPISODE_SOURCES_COLLECTION);
+  }
 
   let syncedCount = 0;
   for (const [epId, cfg] of Object.entries(allLocal)) {
     if (!cloudExisting[epId] && EPISODE_ID_PATTERN.test(epId)) {
-      await upsertEpisodeSourceInCloud(epId, cfg);
-      syncedCount += 1;
+      try {
+        await upsertEpisodeSourceInCloud(epId, cfg);
+        syncedCount += 1;
+      } catch (err) {
+        if (options?.silentOffline && isFirestoreOfflineError(err)) {
+          console.warn('Auto cloud migration paused while offline.');
+          return { syncedCount };
+        }
+        throw err;
+      }
     }
   }
   return { syncedCount };

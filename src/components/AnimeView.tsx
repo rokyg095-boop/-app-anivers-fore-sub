@@ -16,7 +16,11 @@ import {
 } from 'lucide-react';
 import { ANIME_WORKS, DubSeries, DubEpisode } from '../data/mockData';
 import { getCustomEpisodeSource, SOURCES_UPDATED_EVENT } from '../utils/videoSource';
-import { getCustomSeriesByCategory, CUSTOM_WORKS_UPDATED_EVENT } from '../utils/customWorks';
+import { CUSTOM_WORKS_UPDATED_EVENT } from '../utils/customWorks';
+import {
+  CATALOG_OVERRIDES_UPDATED_EVENT,
+  getEffectiveWorksByCategory,
+} from '../utils/catalogOverrides';
 
 interface AnimeViewProps {
   onSelectSeries: (series: DubSeries) => void;
@@ -31,7 +35,6 @@ export const AnimeView: React.FC<AnimeViewProps> = ({
   onPlayEpisode,
   onOpenAdmin,
   isOwnerAdmin = false,
-  onOpenCreateWork,
 }) => {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedGenre, setSelectedGenre] = useState<string>('all');
@@ -43,13 +46,36 @@ export const AnimeView: React.FC<AnimeViewProps> = ({
     const onUpdate = () => setVersionTick((v) => v + 1);
     window.addEventListener(SOURCES_UPDATED_EVENT, onUpdate);
     window.addEventListener(CUSTOM_WORKS_UPDATED_EVENT, onUpdate);
+    window.addEventListener(CATALOG_OVERRIDES_UPDATED_EVENT, onUpdate);
     return () => {
       window.removeEventListener(SOURCES_UPDATED_EVENT, onUpdate);
       window.removeEventListener(CUSTOM_WORKS_UPDATED_EVENT, onUpdate);
+      window.removeEventListener(CATALOG_OVERRIDES_UPDATED_EVENT, onUpdate);
     };
   }, []);
 
-  const allAnimeWorks = [...ANIME_WORKS, ...getCustomSeriesByCategory('anime')];
+  const allAnimeWorks = getEffectiveWorksByCategory('anime');
+
+  if (allAnimeWorks.length === 0) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 text-center space-y-4" dir="rtl">
+        <Tv className="w-12 h-12 text-rose-500 mx-auto opacity-80" />
+        <h2 className="text-2xl font-black text-white">لا توجد مسلسلات أنمي معروضة حالياً</h2>
+        <p className="text-sm text-neutral-400">
+          يمكن للمشرف إضافة أنمي جديد أو استعادة الأعمال من لوحة تحكم المشرف.
+        </p>
+        {isOwnerAdmin && (
+          <button
+            onClick={onOpenAdmin}
+            className="px-4 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold inline-flex items-center gap-2 cursor-pointer"
+          >
+            <ShieldCheck className="w-4 h-4" />
+            <span>فتح لوحة المشرف</span>
+          </button>
+        )}
+      </div>
+    );
+  }
 
   // Active highlighted anime
   const activeAnime =
@@ -110,26 +136,55 @@ export const AnimeView: React.FC<AnimeViewProps> = ({
             />
           </div>
 
-          {isOwnerAdmin && onOpenCreateWork && (
+          {isOwnerAdmin && (
             <button
-              onClick={onOpenCreateWork}
-              className="px-4 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-lg shadow-rose-950/60"
+              onClick={onOpenAdmin}
+              className="px-3.5 py-2.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-800 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+              title="إدارة روابط درايف للأنمي"
             >
-              <Plus className="w-4 h-4" />
-              <span>إضافة أنمي جديد (للمالك)</span>
+              <ShieldCheck className="w-4 h-4 text-rose-500" />
+              <span>إدارة الأنمي والروابط (لوحة المشرف)</span>
             </button>
           )}
-
-          <button
-            onClick={onOpenAdmin}
-            className="px-3.5 py-2.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-800 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-            title="إدارة روابط درايف للأنمي"
-          >
-            <ShieldCheck className="w-4 h-4 text-rose-500" />
-            <span>إدارة روابط الأنمي (المشرف)</span>
-          </button>
         </div>
       </div>
+
+      {/* Genre Filter Bar */}
+      {(() => {
+        const animeGenres = Array.from(
+          new Set(allAnimeWorks.flatMap((a) => a.genres || []).filter(Boolean))
+        );
+        if (animeGenres.length === 0) return null;
+        return (
+          <div className="flex items-center gap-2 overflow-x-auto pb-1">
+            <button
+              type="button"
+              onClick={() => setSelectedGenre('all')}
+              className={`min-h-[36px] px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap cursor-pointer border transition-colors ${
+                selectedGenre === 'all'
+                  ? 'bg-rose-600 text-white border-rose-500 shadow'
+                  : 'bg-neutral-900 text-neutral-400 hover:text-white border-neutral-800'
+              }`}
+            >
+              جميع التصنيفات
+            </button>
+            {animeGenres.map((genre) => (
+              <button
+                key={genre}
+                type="button"
+                onClick={() => setSelectedGenre(selectedGenre === genre ? 'all' : genre)}
+                className={`min-h-[36px] px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap cursor-pointer border transition-colors ${
+                  selectedGenre === genre
+                    ? 'bg-rose-600 text-white border-rose-500 shadow'
+                    : 'bg-neutral-900 text-neutral-300 hover:text-white border-neutral-800'
+                }`}
+              >
+                {genre}
+              </button>
+            ))}
+          </div>
+        );
+      })()}
 
       {/* Anime Quick Switcher Bar */}
       <div className="flex items-center gap-3 overflow-x-auto pb-1">
