@@ -35,6 +35,7 @@ export const AnimeView: React.FC<AnimeViewProps> = ({
   onPlayEpisode,
   onOpenAdmin,
   isOwnerAdmin = false,
+  onOpenCreateWork,
 }) => {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedGenre, setSelectedGenre] = useState<string>('all');
@@ -136,6 +137,16 @@ export const AnimeView: React.FC<AnimeViewProps> = ({
             />
           </div>
 
+          {isOwnerAdmin && onOpenCreateWork && (
+            <button
+              onClick={onOpenCreateWork}
+              className="px-4 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-colors cursor-pointer shrink-0 shadow"
+            >
+              <Plus className="w-4 h-4" />
+              <span>إضافة أنمي بحلقات كاملة</span>
+            </button>
+          )}
+
           {isOwnerAdmin && (
             <button
               onClick={onOpenAdmin}
@@ -143,7 +154,7 @@ export const AnimeView: React.FC<AnimeViewProps> = ({
               title="إدارة روابط درايف للأنمي"
             >
               <ShieldCheck className="w-4 h-4 text-rose-500" />
-              <span>إدارة الأنمي والروابط (لوحة المشرف)</span>
+              <span>إدارة الأنمي والروابط</span>
             </button>
           )}
         </div>

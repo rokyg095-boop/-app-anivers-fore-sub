@@ -20,7 +20,37 @@ export interface TmdbEpisodeMeta {
   runtimeMinutes: number;
   durationText: string;
   stillUrl: string;
+  imdbRating?: string;
   guestStars: TmdbCastMember[];
+}
+
+export interface TmdbExternalRatings {
+  tmdb?: number;
+  imdb?: string;
+  imdbVotes?: string;
+  rottenTomatoes?: string;
+  metascore?: string;
+  rated?: string;
+  awards?: string;
+  malScore?: number;
+  malRank?: number;
+  malScoredBy?: number;
+  malId?: number;
+  studios?: string[];
+  tvmazeRating?: number;
+  network?: string;
+  kitsuScore?: string;
+  kitsuRank?: number;
+}
+
+export interface JikanCharacterActor {
+  malId: number;
+  name: string;
+  role: string;
+  imageUrl: string;
+  voiceActorName?: string;
+  voiceActorImage?: string;
+  voiceActorLanguage?: string;
 }
 
 export interface TmdbWorkEnrichment {
@@ -28,6 +58,7 @@ export interface TmdbWorkEnrichment {
   configured: boolean;
   found?: boolean;
   tmdbId?: number;
+  imdbId?: string;
   mediaType?: 'tv' | 'movie';
   title?: string;
   originalTitle?: string;
@@ -39,6 +70,21 @@ export interface TmdbWorkEnrichment {
   genres?: string[];
   seasonsCount?: number;
   cast?: TmdbCastMember[];
+  sourcesUsed?: Array<'tmdb' | 'omdb' | 'jikan' | 'tvmaze' | 'kitsu'>;
+  externalRatings?: TmdbExternalRatings;
+  animeExtras?: {
+    malId: number;
+    malUrl?: string;
+    malScore?: number;
+    malScoredBy?: number;
+    malRank?: number;
+    titleJapanese?: string;
+    titleEnglish?: string;
+    studios: string[];
+    themes: string[];
+    rating?: string;
+    characters: JikanCharacterActor[];
+  };
   episodes?: TmdbEpisodeMeta[];
 }
 
@@ -62,13 +108,29 @@ export interface ResolvedEpisodePreWatchInfo {
   thumbnail: string;
   duration: string;
   releaseDate: string;
+  imdbRating?: string;
   castMembers: TmdbCastMember[];
   guestActors: TmdbCastMember[];
   voiceActorNames: string[];
   tmdbMatched: boolean;
 }
 
-const TMDB_CLIENT_CACHE_KEY = 'aniverse_tmdb_client_cache_v1';
+export interface ComicEnrichmentResult {
+  ok: boolean;
+  found?: boolean;
+  sourcesUsed?: Array<'mangadex' | 'comicvine'>;
+  mangadexId?: string;
+  mangadexRating?: number;
+  mangadexFollows?: number;
+  status?: string;
+  year?: number | string;
+  publisher?: string;
+  issuesCount?: number;
+  synopsis?: string;
+  tags?: string[];
+}
+
+const TMDB_CLIENT_CACHE_KEY = 'aniverse_tmdb_client_cache_v3';
 const TMDB_CUSTOM_MAP_KEY = 'aniverse_tmdb_custom_map_v1';
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 
@@ -425,9 +487,184 @@ export function resolveEnrichedEpisodeDetails(
     thumbnail: resolvedThumb,
     duration: resolvedDuration,
     releaseDate: resolvedReleaseDate,
+    imdbRating: primaryTmdbEp?.imdbRating,
     castMembers,
     guestActors,
     voiceActorNames,
     tmdbMatched: matchedEps.length > 0 || seriesCast.length > 0,
   };
 }
+
+const comicCache = new Map<string, ComicEnrichmentResult>();
+
+export async function fetchComicEnrichment(comic: {
+  id: string;
+  title: string;
+  originalTitle?: string;
+}): Promise<ComicEnrichmentResult | null> {
+  if (!comic?.id) return null;
+  const cached = comicCache.get(comic.id);
+  if (cached) return cached;
+
+  try {
+    const params = new URLSearchParams({
+      comicId: comic.id,
+      title: comic.title || '',
+      originalTitle: comic.originalTitle || '',
+    });
+    const res = await fetch(`/api/comics/enrich?${params.toString()}`);
+    if (!res.ok) return null;
+    const data = (await res.json()) as ComicEnrichmentResult;
+    if (data?.found) {
+      comicCache.set(comic.id, data);
+    }
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+export type ApiDiscoverFeed = 'trending' | 'popular' | 'top_rated' | 'upcoming' | 'animation';
+
+export interface ApiDiscoverItem {
+  externalId: string;
+  tmdbId?: number;
+  imdbId?: string;
+  mediaType: 'movie' | 'tv';
+  source: 'tmdb' | 'anilist' | 'kitsu' | 'omdb';
+  title: string;
+  originalTitle: string;
+  overview: string;
+  posterUrl: string;
+  backdropUrl: string;
+  releaseDate: string;
+  voteAverage: number;
+  genres: string[];
+  episodesCount?: number;
+}
+
+export interface ApiDiscoverResponse {
+  ok: boolean;
+  configured: boolean;
+  sourcesAvailable?: {
+    tmdb: boolean;
+    omdb: boolean;
+    anilist: boolean;
+    kitsu: boolean;
+  };
+  page: number;
+  totalPages: number;
+  results: ApiDiscoverItem[];
+}
+
+export function buildApiImportWorkId(
+  category: 'anime' | 'movie' | 'dubbed' | 'tv',
+  item: Pick<ApiDiscoverItem, 'tmdbId' | 'source' | 'externalId'>
+): string {
+  if (item.tmdbId && item.tmdbId > 0) {
+    return `cw-${category}-tmdb-${item.tmdbId}`;
+  }
+  const safeExt = String(item.externalId || 'item')
+    .replace(/[^a-zA-Z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48);
+  return `cw-${category}-${item.source}-${safeExt || 'work'}`.slice(0, 100);
+}
+
+export async function discoverWorksFromApis(options: {
+  category: 'anime' | 'movie' | 'dubbed' | 'tv';
+  feed?: ApiDiscoverFeed;
+  query?: string;
+  page?: number;
+}): Promise<ApiDiscoverResponse> {
+  try {
+    const params = new URLSearchParams({
+      category: options.category,
+      feed: options.feed || 'popular',
+      page: String(options.page || 1),
+    });
+    if (options.query?.trim()) {
+      params.set('query', options.query.trim());
+    }
+    const res = await fetch(`/api/tmdb/discover?${params.toString()}`);
+    if (!res.ok) {
+      return { ok: false, configured: false, page: 1, totalPages: 1, results: [] };
+    }
+    return (await res.json()) as ApiDiscoverResponse;
+  } catch {
+    return { ok: false, configured: false, page: 1, totalPages: 1, results: [] };
+  }
+}
+
+export interface ArchiveSearchItem {
+  identifier: string;
+  title: string;
+  description: string;
+  year: string;
+  downloads: number;
+  runtime: string;
+  posterUrl: string;
+  episodesCount?: number;
+}
+
+export interface ArchiveEpisodeFile {
+  episodeNumber: number;
+  title: string;
+  duration: string;
+  videoUrl: string;
+  backupVideoUrl?: string;
+  fileName: string;
+  sizeBytes: number;
+}
+
+export interface ArchiveItemDetails {
+  ok: boolean;
+  identifier: string;
+  title: string;
+  description: string;
+  year: string;
+  posterUrl: string;
+  episodesCount: number;
+  episodes: ArchiveEpisodeFile[];
+}
+
+export async function discoverArchiveWorks(options: {
+  category: 'anime' | 'movie' | 'dubbed' | 'tv';
+  query?: string;
+  page?: number;
+}): Promise<{ ok: boolean; results: ArchiveSearchItem[]; page: number; totalPages: number }> {
+  try {
+    const params = new URLSearchParams({
+      category: options.category,
+      page: String(options.page || 1),
+    });
+    if (options.query?.trim()) {
+      params.set('query', options.query.trim());
+    }
+    const res = await fetch(`/api/archive/discover?${params.toString()}`);
+    if (!res.ok) return { ok: false, results: [], page: 1, totalPages: 1 };
+    return (await res.json()) as {
+      ok: boolean;
+      results: ArchiveSearchItem[];
+      page: number;
+      totalPages: number;
+    };
+  } catch {
+    return { ok: false, results: [], page: 1, totalPages: 1 };
+  }
+}
+
+export async function fetchArchiveItemDetails(
+  identifier: string
+): Promise<ArchiveItemDetails | null> {
+  try {
+    const res = await fetch(`/api/archive/item/${encodeURIComponent(identifier)}`);
+    if (!res.ok) return null;
+    const data = (await res.json()) as ArchiveItemDetails;
+    return data?.ok ? data : null;
+  } catch {
+    return null;
+  }
+}
+
+

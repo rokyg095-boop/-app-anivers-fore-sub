@@ -566,6 +566,9 @@ export default function App() {
             onPlayEpisode={(ep, s) => setActiveVideoSession({ episode: ep, series: s })}
             onOpenAdmin={() => setIsAdminOpen(true)}
             isOwnerAdmin={isOwnerAdmin}
+            onOpenCreateWork={
+              isOwnerAdmin ? () => setCreateWorkCategory('anime') : undefined
+            }
           />
         )}
 
@@ -576,6 +579,9 @@ export default function App() {
             onPlayEpisode={(ep, s) => setActiveVideoSession({ episode: ep, series: s })}
             onOpenAdmin={() => setIsAdminOpen(true)}
             isOwnerAdmin={isOwnerAdmin}
+            onOpenCreateWork={
+              isOwnerAdmin ? () => setCreateWorkCategory('movie') : undefined
+            }
           />
         )}
 

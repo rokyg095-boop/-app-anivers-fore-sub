@@ -821,10 +821,12 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
                             label={`📺 ${season.title} (${seasonEpisodes.length} حلقة)`}
                           >
                             {seasonEpisodes.map((ep) => {
-                              const isLinked = Boolean(ep?.id && allSavedConfigs[ep.id]?.driveLink);
+                              const epCfg = ep?.id ? allSavedConfigs[ep.id] : undefined;
+                              const isLinked = Boolean(epCfg?.driveLink || epCfg?.videoUrl);
+                              const isArchive = Boolean(epCfg?.accountLabel?.includes('Archive.org'));
                               return (
                                 <option key={ep.id} value={ep.id}>
-                                  الحلقة {ep.episodeNumber}: {ep.title} {isLinked ? '⭐ (مربوطة بدرايف)' : ''}
+                                  الحلقة {ep.episodeNumber}: {ep.title} {isLinked ? (isArchive ? '🎬 (فيديو Archive.org)' : '⭐ (مربوطة بدرايف)') : ''}
                                 </option>
                               );
                             })}
@@ -833,10 +835,12 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
                       })
                     ) : (
                       allEpisodes.map((ep) => {
-                        const isLinked = Boolean(ep?.id && allSavedConfigs[ep.id]?.driveLink);
+                        const epCfg = ep?.id ? allSavedConfigs[ep.id] : undefined;
+                        const isLinked = Boolean(epCfg?.driveLink || epCfg?.videoUrl);
+                        const isArchive = Boolean(epCfg?.accountLabel?.includes('Archive.org'));
                         return (
                           <option key={ep.id} value={ep.id}>
-                            الحلقة {ep.episodeNumber}: {ep.title} {isLinked ? '⭐ (مربوطة بدرايف)' : ''}
+                            الحلقة {ep.episodeNumber}: {ep.title} {isLinked ? (isArchive ? '🎬 (فيديو Archive.org)' : '⭐ (مربوطة بدرايف)') : ''}
                           </option>
                         );
                       })
@@ -865,9 +869,11 @@ export const AdminMediaDashboard: React.FC<AdminMediaDashboardProps> = ({
                       <span className="text-xs text-neutral-400 font-mono">
                         {currentEpisode.duration}
                       </span>
-                      {allSavedConfigs[currentEpisode.id]?.driveLink ? (
+                      {allSavedConfigs[currentEpisode.id]?.driveLink || allSavedConfigs[currentEpisode.id]?.videoUrl ? (
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                          مربوطة بسحابة Google Drive في الخلفية
+                          {allSavedConfigs[currentEpisode.id]?.accountLabel?.includes('Archive.org')
+                            ? 'مربوطة بفيديو مباشر (Archive.org)'
+                            : 'مربوطة بسحابة Google Drive في الخلفية'}
                         </span>
                       ) : (
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-neutral-800 text-neutral-300 border border-neutral-700">

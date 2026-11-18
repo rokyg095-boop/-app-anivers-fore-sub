@@ -18,6 +18,8 @@ import {
   X,
   Cloud,
   Sparkles,
+  Play,
+  Loader2,
 } from 'lucide-react';
 import { DubEpisode, DubSeason, DubSeries } from '../data/mockData.ts';
 import {
@@ -26,6 +28,7 @@ import {
   formatCloudErrorMessage,
 } from '../utils/customWorks.ts';
 import {
+  CATALOG_OVERRIDES_UPDATED_EVENT,
   deleteAnySeriesInCloud,
   editAnySeriesInCloud,
   generateUniqueEpisodeId,
@@ -47,8 +50,13 @@ import {
   getCustomEpisodeSource,
   normalizeDriveDirectUrl,
   saveCustomEpisodeSource,
+  saveCustomEpisodeSourcesBatch,
+  SOURCES_UPDATED_EVENT,
 } from '../utils/videoSource.ts';
 import {
+  ArchiveSearchItem,
+  discoverArchiveWorks,
+  fetchArchiveItemDetails,
   fetchTmdbEnrichmentForWork,
   resolveEnrichedEpisodeDetails,
   saveTmdbWorkMapping,
@@ -618,6 +626,18 @@ export const AdminEpisodeListManager: React.FC<AdminEpisodeListManagerProps> = (
   onChangeSeriesId,
   onShowToast,
 }) => {
+  const [, setSyncTick] = useState<number>(0);
+
+  useEffect(() => {
+    const onRefresh = () => setSyncTick((t) => t + 1);
+    window.addEventListener(CATALOG_OVERRIDES_UPDATED_EVENT, onRefresh);
+    window.addEventListener(SOURCES_UPDATED_EVENT, onRefresh);
+    return () => {
+      window.removeEventListener(CATALOG_OVERRIDES_UPDATED_EVENT, onRefresh);
+      window.removeEventListener(SOURCES_UPDATED_EVENT, onRefresh);
+    };
+  }, []);
+
   const allWorks = getAllEffectiveMediaWorks();
   const series = allWorks.find((s) => s.id === selectedSeriesId) || allWorks[0];
 
@@ -653,9 +673,21 @@ export const AdminEpisodeListManager: React.FC<AdminEpisodeListManagerProps> = (
   const [tmdbSearchResults, setTmdbSearchResults] = useState<TmdbSearchResult[]>([]);
   const [searchingTmdb, setSearchingTmdb] = useState<boolean>(false);
 
+  // Archive.org auto-fill video episodes state
+  const [showArchiveFill, setShowArchiveFill] = useState<boolean>(false);
+  const [archiveFillQuery, setArchiveFillQuery] = useState<string>('');
+  const [archiveFillSearching, setArchiveFillSearching] = useState<boolean>(false);
+  const [archiveFillResults, setArchiveFillResults] = useState<ArchiveSearchItem[]>([]);
+  const [fillingArchiveId, setFillingArchiveId] = useState<string | null>(null);
+  const [archiveFillProgress, setArchiveFillProgress] = useState<{ done: number; total: number } | null>(null);
+
   const seasons: DubSeason[] = series?.seasons || [];
   const activeSeason =
     seasons.find((s) => s.id === selectedSeasonId) || seasons[0] || null;
+  const activeSeasonEpisodesKey = (activeSeason?.episodes || [])
+    .filter(Boolean)
+    .map((e) => `${e.id}:${e.episodeNumber}:${e.title}:${e.isComingSoon}`)
+    .join('|');
 
   // Ensure selectedSeasonId stays valid when switching series
   useEffect(() => {
@@ -665,7 +697,18 @@ export const AdminEpisodeListManager: React.FC<AdminEpisodeListManagerProps> = (
     }
   }, [series?.id, seasons, selectedSeasonId]);
 
-  // Sync draft episodes whenever series or season updates
+  // Reset UI selection when switching series/season
+  useEffect(() => {
+    setSelectedIds([]);
+    setEditingEpId(null);
+    setShowAddForm(false);
+    setShowArchiveFill(false);
+    setArchiveFillResults([]);
+    setTitleDirty(false);
+    setErrorMsg(null);
+  }, [series?.id, activeSeason?.id]);
+
+  // Keep draftEpisodes synced whenever series/season or underlying catalog overrides update
   useEffect(() => {
     if (!activeSeason) {
       setDraftEpisodes([]);
@@ -674,12 +717,7 @@ export const AdminEpisodeListManager: React.FC<AdminEpisodeListManagerProps> = (
     }
     setDraftEpisodes((activeSeason.episodes || []).filter(Boolean).map((e) => ({ ...e })));
     setDraftSeasonTitle(activeSeason.title);
-    setSelectedIds([]);
-    setEditingEpId(null);
-    setShowAddForm(false);
-    setTitleDirty(false);
-    setErrorMsg(null);
-  }, [series?.id, activeSeason?.id]);
+  }, [series?.id, activeSeason?.id, activeSeasonEpisodesKey]);
 
   if (!series || !activeSeason) {
     return (
@@ -970,7 +1008,46 @@ export const AdminEpisodeListManager: React.FC<AdminEpisodeListManagerProps> = (
         return;
       }
 
-      const nextEpisodes = draftEpisodes.map((ep) => {
+      const baseEpisodes = [...draftEpisodes];
+      const existingNums = new Set(baseEpisodes.map((ep) => ep.episodeNumber));
+      const tmdbSeasonEps = enrichment.episodes || [];
+      for (const tmEp of tmdbSeasonEps) {
+        if (!existingNums.has(tmEp.episodeNumber)) {
+          const newId = generateUniqueEpisodeId(activeSeason.id, `ep${tmEp.episodeNumber}`);
+          baseEpisodes.push({
+            id: newId,
+            episodeNumber: tmEp.episodeNumber,
+            title: tmEp.name || tmEp.nameEn || `الحلقة ${tmEp.episodeNumber}`,
+            duration: tmEp.durationText || '24:00',
+            thumbnail: tmEp.stillUrl || series.coverImage,
+            videoUrl: '',
+            dubStudio: series.dubStudio,
+            voiceActors: [series.dubStudio],
+            releaseDate: tmEp.airDate || 'TMDB',
+            description: tmEp.overview || tmEp.overviewEn || series.synopsis,
+            isComingSoon: true,
+          });
+          existingNums.add(tmEp.episodeNumber);
+        }
+      }
+      if (baseEpisodes.length === 0 && series.category === 'movie') {
+        baseEpisodes.push({
+          id: `${series.id}-movie-1`,
+          episodeNumber: 1,
+          title: `${enrichment.title || series.title} (الفيلم الكامل)`,
+          duration: '02:00:00',
+          thumbnail: enrichment.backdropUrl || enrichment.posterUrl || series.coverImage,
+          videoUrl: '',
+          dubStudio: series.dubStudio,
+          voiceActors: [series.dubStudio],
+          releaseDate: enrichment.releaseDate || 'TMDB',
+          description: enrichment.overview || series.synopsis,
+          isComingSoon: true,
+        });
+      }
+      baseEpisodes.sort((a, b) => a.episodeNumber - b.episodeNumber);
+
+      const nextEpisodes = baseEpisodes.map((ep) => {
         const resolved = resolveEnrichedEpisodeDetails(ep, series, enrichment, true);
         return {
           ...ep,
@@ -1018,6 +1095,153 @@ export const AdminEpisodeListManager: React.FC<AdminEpisodeListManagerProps> = (
     setTmdbSearchResults([]);
     onShowToast(`تم ربط «${series.title}» بـ TMDB (${match.title}) — جاري مزامنة الموسم...`);
     await handleSyncSeasonFromTmdb();
+  };
+
+  const handleSearchArchiveFill = async (overrideQ?: string) => {
+    const q = (overrideQ ?? archiveFillQuery ?? series.originalTitle ?? series.title).trim();
+    setArchiveFillSearching(true);
+    setErrorMsg(null);
+    try {
+      const cat: CustomWorkCategory =
+        series.category === 'anime' || series.category === 'movie' || series.category === 'tv'
+          ? series.category
+          : 'dubbed';
+      const res = await discoverArchiveWorks({
+        category: cat,
+        query: q,
+        page: 1,
+      });
+      setArchiveFillResults(Array.isArray(res.results) ? res.results : []);
+      if (!res.results || res.results.length === 0) {
+        setErrorMsg(`لم يتم العثور على حلقات فيديو في Archive.org لـ «${q}» — جرب اسماً إنجليزياً آخر.`);
+      }
+    } catch {
+      setErrorMsg('تعذر البحث في Archive.org حالياً.');
+    } finally {
+      setArchiveFillSearching(false);
+    }
+  };
+
+  const handleApplyArchiveFill = async (item: ArchiveSearchItem) => {
+    setFillingArchiveId(item.identifier);
+    setArchiveFillProgress(null);
+    setErrorMsg(null);
+    try {
+      const details = await fetchArchiveItemDetails(item.identifier);
+      if (!details || !details.episodes || details.episodes.length === 0) {
+        setErrorMsg(`«${item.title}» لا يحتوي على ملفات فيديو MP4 صالحة للتشغيل.`);
+        return;
+      }
+
+      const archiveEps = details.episodes.slice(0, 150);
+      const isSingleMovie = series.category === 'movie' && archiveEps.length === 1;
+
+      const batchEntries: Array<{
+        episodeId: string;
+        config: {
+          driveLink: string;
+          videoUrl: string;
+          accountLabel: string;
+          backupDriveLinks: Array<{ id: string; url: string; accountLabel: string }>;
+          subtitles: typeof DEFAULT_SUBTITLE_TRACKS;
+        };
+      }> = [];
+
+      const nextEpisodes: DubEpisode[] = [];
+      const existingCount = draftEpisodes.length;
+      const totalCount = Math.max(existingCount, archiveEps.length);
+
+      for (let i = 0; i < totalCount; i += 1) {
+        const existingEp = draftEpisodes[i];
+        const archEp = archiveEps[i];
+        if (existingEp && archEp) {
+          const updatedEp: DubEpisode = {
+            ...existingEp,
+            duration: existingEp.duration && existingEp.duration !== 'قريباً' ? existingEp.duration : archEp.duration || '22:00',
+            videoUrl: archEp.videoUrl,
+            releaseDate: existingEp.releaseDate || details.year || item.year || 'Archive.org',
+            isComingSoon: false,
+          };
+          nextEpisodes.push(updatedEp);
+          batchEntries.push({
+            episodeId: updatedEp.id,
+            config: {
+              driveLink: archEp.videoUrl,
+              videoUrl: archEp.videoUrl,
+              accountLabel: 'Archive.org',
+              backupDriveLinks: archEp.backupVideoUrl
+                ? [{ id: 'archive-512kb', url: archEp.backupVideoUrl, accountLabel: 'Archive.org (MP4 خفيف)' }]
+                : [],
+              subtitles: DEFAULT_SUBTITLE_TRACKS,
+            },
+          });
+        } else if (existingEp) {
+          nextEpisodes.push(existingEp);
+        } else if (archEp) {
+          const epNum = archEp.episodeNumber || i + 1;
+          const newId = isSingleMovie
+            ? `${series.id}-movie-1`
+            : activeSeason.seasonNumber === 1
+            ? `${series.id}-ep-${epNum}`
+            : `${series.id}-s${activeSeason.seasonNumber}-ep-${epNum}`;
+          const safeId = newId.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 100);
+          const createdEp: DubEpisode = {
+            id: safeId,
+            episodeNumber: epNum,
+            title: isSingleMovie ? `${series.title} (الفيلم الكامل)` : archEp.title || `الحلقة ${epNum}`,
+            duration: archEp.duration || '22:00',
+            thumbnail: series.coverImage,
+            videoUrl: archEp.videoUrl,
+            dubStudio: series.dubStudio || 'Archive.org',
+            voiceActors: [series.dubStudio || 'Archive.org'],
+            releaseDate: details.year || item.year || 'Archive.org',
+            description: series.synopsis || archEp.title,
+            isComingSoon: false,
+          };
+          nextEpisodes.push(createdEp);
+          batchEntries.push({
+            episodeId: safeId,
+            config: {
+              driveLink: archEp.videoUrl,
+              videoUrl: archEp.videoUrl,
+              accountLabel: 'Archive.org',
+              backupDriveLinks: archEp.backupVideoUrl
+                ? [{ id: 'archive-512kb', url: archEp.backupVideoUrl, accountLabel: 'Archive.org (MP4 خفيف)' }]
+                : [],
+              subtitles: DEFAULT_SUBTITLE_TRACKS,
+            },
+          });
+        }
+      }
+
+      setArchiveFillProgress({ done: 0, total: batchEntries.length });
+      const batchRes = await saveCustomEpisodeSourcesBatch(batchEntries, (done, total) =>
+        setArchiveFillProgress({ done, total })
+      );
+
+      if (batchRes.cloudSavedCount === 0) {
+        setErrorMsg(
+          formatCloudErrorMessage(
+            batchRes.cloudError,
+            'تعذر حفظ روابط الفيديو في سحابة Firebase — تأكد من تسجيل الدخول بحساب المالك.'
+          )
+        );
+        return;
+      }
+
+      const savedSeason = await commitEpisodesToCloud(
+        nextEpisodes,
+        `تمت تعبئة وحفظ ${batchRes.cloudSavedCount} حلقة/فيديو جاهز للتشغيل من Archive.org بنجاح!`
+      );
+      if (savedSeason) {
+        setShowArchiveFill(false);
+      }
+    } catch (err) {
+      setErrorMsg(formatCloudErrorMessage(err, 'تعذر تعبئة الفيديوهات من Archive.org'));
+    } finally {
+      setFillingArchiveId(null);
+      setArchiveFillProgress(null);
+    }
   };
 
   return (
@@ -1128,6 +1352,29 @@ export const AdminEpisodeListManager: React.FC<AdminEpisodeListManagerProps> = (
             className="px-2.5 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700 text-[11px] font-bold cursor-pointer disabled:opacity-50"
           >
             ترقيم تلقائي (1..{draftEpisodes.length})
+          </button>
+
+          <button
+            type="button"
+            disabled={savingCloud || Boolean(fillingArchiveId)}
+            onClick={() => {
+              const nextOpen = !showArchiveFill;
+              setShowArchiveFill(nextOpen);
+              if (nextOpen) {
+                const defaultQ = series.originalTitle || series.title;
+                setArchiveFillQuery(defaultQ);
+                void handleSearchArchiveFill(defaultQ);
+              }
+            }}
+            className="px-3 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/35 text-emerald-300 border border-emerald-500/40 text-[11px] font-black flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+            title="تعبئة وربط فيديوهات MP4 كاملة تلقائياً لهذا العمل من Archive.org"
+          >
+            {fillingArchiveId ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Play className="w-3.5 h-3.5" />
+            )}
+            <span>تعبئة الفيديوهات من Archive.org</span>
           </button>
 
           <button
@@ -1243,6 +1490,107 @@ export const AdminEpisodeListManager: React.FC<AdminEpisodeListManagerProps> = (
                   </div>
                 </button>
               ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Archive.org Auto-Fill Video Episodes Picker */}
+      {showArchiveFill && (
+        <div className="p-3.5 rounded-2xl bg-neutral-950 border border-emerald-500/40 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-black text-emerald-300 flex items-center gap-1.5">
+              <Play className="w-4 h-4 text-emerald-400" />
+              <span>تعبئة الحلقات بفيديوهات MP4 كاملة من Archive.org لـ «{series.title}»</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowArchiveFill(false)}
+              className="text-neutral-400 hover:text-white cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={archiveFillQuery}
+              onChange={(e) => setArchiveFillQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  void handleSearchArchiveFill();
+                }
+              }}
+              placeholder="ابحث بالاسم الإنجليزي أو العربي (مثال: Death Note أو Spider-Man)..."
+              className="flex-1 bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-400"
+            />
+            <button
+              type="button"
+              disabled={archiveFillSearching}
+              onClick={() => void handleSearchArchiveFill()}
+              className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs cursor-pointer disabled:opacity-50"
+            >
+              {archiveFillSearching ? 'جاري البحث...' : 'بحث Archive'}
+            </button>
+          </div>
+
+          {fillingArchiveId && archiveFillProgress && (
+            <div className="p-2.5 rounded-xl bg-emerald-950/50 border border-emerald-500/30 text-xs text-emerald-200 font-bold flex items-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin text-emerald-400 shrink-0" />
+              <span>
+                جاري تعبئة وحفظ الفيديوهات في السحابة ({archiveFillProgress.done}/{archiveFillProgress.total})...
+              </span>
+            </div>
+          )}
+
+          {archiveFillResults.length > 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-72 overflow-y-auto">
+              {archiveFillResults.map((item) => {
+                const isFillingThis = fillingArchiveId === item.identifier;
+                return (
+                  <div
+                    key={item.identifier}
+                    className="p-2.5 rounded-xl bg-neutral-900 border border-neutral-800 flex items-center gap-2.5"
+                  >
+                    <img
+                      src={item.posterUrl}
+                      alt={item.title}
+                      className="w-11 h-16 rounded-lg object-cover shrink-0 bg-neutral-800"
+                    />
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <div className="text-xs font-bold text-white truncate">{item.title}</div>
+                      <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-neutral-400">
+                        {item.year && <span>{item.year}</span>}
+                        {typeof item.episodesCount === 'number' && item.episodesCount > 0 && (
+                          <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 font-bold">
+                            {item.episodesCount} {item.episodesCount === 1 ? 'فيديو MP4' : 'حلقة MP4'}
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        disabled={Boolean(fillingArchiveId)}
+                        onClick={() => void handleApplyArchiveFill(item)}
+                        className="w-full px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-black text-[11px] flex items-center justify-center gap-1 cursor-pointer"
+                      >
+                        {isFillingThis ? (
+                          <>
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                            <span>جاري التعبئة...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Play className="w-3 h-3" />
+                            <span>تعبئة الحلقات من هذا المصدر</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -1399,7 +1747,9 @@ export const AdminEpisodeListManager: React.FC<AdminEpisodeListManagerProps> = (
                       </span>
                       {hasDrive && (
                         <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                          مربوطة بدرايف
+                          {allSources[ep.id]?.accountLabel?.includes('Archive.org')
+                            ? 'فيديو Archive.org جاهز'
+                            : 'مربوطة بدرايف'}
                         </span>
                       )}
                     </div>

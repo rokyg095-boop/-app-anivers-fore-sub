@@ -197,9 +197,24 @@ export const DubSeriesDetailModal: React.FC<DubSeriesDetailModalProps> = ({
                 <Film className="w-4 h-4 text-violet-300 shrink-0" />
                 <span className="truncate">{series.dubStudio}</span>
                 {tmdbEnrichment?.found && (
-                  <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-bold text-emerald-300 bg-emerald-500/15 border border-emerald-400/30 px-2 py-0.5 rounded-full">
+                  <span className="hidden sm:inline-flex items-center gap-1.5 text-[10px] font-bold text-emerald-300 bg-emerald-500/15 border border-emerald-400/30 px-2.5 py-0.5 rounded-full">
                     <Sparkles className="w-3 h-3" />
-                    <span>معلومات متزامنة تلقائياً</span>
+                    <span>
+                      متزامن:{' '}
+                      {(tmdbEnrichment.sourcesUsed || ['tmdb'])
+                        .map((s) =>
+                          s === 'tmdb'
+                            ? 'TMDB'
+                            : s === 'omdb'
+                            ? 'IMDb'
+                            : s === 'jikan'
+                            ? 'AniList / MAL'
+                            : s === 'kitsu'
+                            ? 'Kitsu'
+                            : 'TVmaze'
+                        )
+                        .join(' + ')}
+                    </span>
                   </span>
                 )}
               </div>
@@ -249,11 +264,102 @@ export const DubSeriesDetailModal: React.FC<DubSeriesDetailModalProps> = ({
                           {series.originalTitle}
                         </p>
                       )}
+                    {/* Multi-Source External Ratings Strip (TMDB + IMDb / OMDb + Rotten Tomatoes + AniList/MAL + TVmaze) */}
+                    {tmdbEnrichment?.externalRatings &&
+                      (tmdbEnrichment.externalRatings.imdb ||
+                        tmdbEnrichment.externalRatings.rottenTomatoes ||
+                        tmdbEnrichment.externalRatings.metascore ||
+                        tmdbEnrichment.externalRatings.malScore ||
+                        tmdbEnrichment.externalRatings.kitsuScore ||
+                        tmdbEnrichment.externalRatings.tvmazeRating ||
+                        tmdbEnrichment.externalRatings.network ||
+                        tmdbEnrichment.externalRatings.rated ||
+                        (tmdbEnrichment.externalRatings.studios &&
+                          tmdbEnrichment.externalRatings.studios.length > 0)) && (
+                        <div className="flex flex-wrap items-center gap-2 pt-1 text-[11px] font-bold">
+                          {tmdbEnrichment.externalRatings.imdb && (
+                            <span
+                              className="px-2.5 py-1 rounded-lg bg-amber-400/15 border border-amber-300/35 text-amber-200 tabular-nums"
+                              dir="ltr"
+                            >
+                              IMDb {tmdbEnrichment.externalRatings.imdb}/10
+                            </span>
+                          )}
+                          {tmdbEnrichment.externalRatings.rottenTomatoes && (
+                            <span
+                              className="px-2.5 py-1 rounded-lg bg-rose-500/15 border border-rose-400/35 text-rose-200 tabular-nums"
+                              dir="ltr"
+                            >
+                              🍅 {tmdbEnrichment.externalRatings.rottenTomatoes}
+                            </span>
+                          )}
+                          {tmdbEnrichment.externalRatings.metascore && (
+                            <span
+                              className="px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-400/35 text-emerald-200 tabular-nums"
+                              dir="ltr"
+                            >
+                              Metascore {tmdbEnrichment.externalRatings.metascore}
+                            </span>
+                          )}
+                          {tmdbEnrichment.externalRatings.malScore && (
+                            <span
+                              className="px-2.5 py-1 rounded-lg bg-sky-500/15 border border-sky-400/35 text-sky-200 tabular-nums"
+                              dir="ltr"
+                            >
+                              AniList/MAL ★ {tmdbEnrichment.externalRatings.malScore}
+                              {tmdbEnrichment.externalRatings.malRank
+                                ? ` (#${tmdbEnrichment.externalRatings.malRank})`
+                                : ''}
+                            </span>
+                          )}
+                          {tmdbEnrichment.externalRatings.kitsuScore && (
+                            <span
+                              className="px-2.5 py-1 rounded-lg bg-orange-500/15 border border-orange-400/35 text-orange-200 tabular-nums"
+                              dir="ltr"
+                            >
+                              Kitsu ★ {tmdbEnrichment.externalRatings.kitsuScore}
+                            </span>
+                          )}
+                          {tmdbEnrichment.externalRatings.tvmazeRating && (
+                            <span
+                              className="px-2.5 py-1 rounded-lg bg-teal-500/15 border border-teal-400/35 text-teal-200 tabular-nums"
+                              dir="ltr"
+                            >
+                              TVmaze ★ {tmdbEnrichment.externalRatings.tvmazeRating}
+                            </span>
+                          )}
+                          {tmdbEnrichment.externalRatings.network && (
+                            <span className="px-2.5 py-1 rounded-lg bg-indigo-500/15 border border-indigo-300/30 text-indigo-200">
+                              القناة: {tmdbEnrichment.externalRatings.network}
+                            </span>
+                          )}
+                          {tmdbEnrichment.externalRatings.studios &&
+                            tmdbEnrichment.externalRatings.studios.length > 0 && (
+                              <span className="px-2.5 py-1 rounded-lg bg-violet-500/15 border border-violet-300/30 text-violet-200">
+                                استوديو: {tmdbEnrichment.externalRatings.studios.slice(0, 2).join('، ')}
+                              </span>
+                            )}
+                          {tmdbEnrichment.externalRatings.rated && (
+                            <span
+                              className="px-2 py-1 rounded-lg bg-white/10 border border-white/20 text-white/80 font-mono"
+                              dir="ltr"
+                            >
+                              {tmdbEnrichment.externalRatings.rated}
+                            </span>
+                          )}
+                        </div>
+                      )}
                   </div>
 
                   <p className="text-xs sm:text-sm text-white/85 leading-relaxed max-w-2xl">
                     {displaySynopsis}
                   </p>
+
+                  {tmdbEnrichment?.externalRatings?.awards && (
+                    <p className="text-[11px] text-amber-200/80 font-medium">
+                      الجوائز: {tmdbEnrichment.externalRatings.awards}
+                    </p>
+                  )}
 
                   {/* Signature Frosted Pill Buttons (Watch Now & Add to Favorites) */}
                   <div className="pt-1 flex flex-wrap items-center gap-3">
@@ -416,6 +522,59 @@ export const DubSeriesDetailModal: React.FC<DubSeriesDetailModalProps> = ({
                   </div>
                 </div>
               )}
+
+              {/* Anime Characters & Voice Actors Row (fetched from MyAnimeList / Jikan when available) */}
+              {tmdbEnrichment?.animeExtras?.characters &&
+                tmdbEnrichment.animeExtras.characters.length > 0 && (
+                  <div className="mt-5 pt-4 border-t border-white/10">
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-xs sm:text-sm font-bold text-sky-200 flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-sky-300" />
+                        <span>
+                          الشخصيات ومؤدو الأصوات اليابانيون — MyAnimeList (
+                          {tmdbEnrichment.animeExtras.characters.length})
+                        </span>
+                      </h3>
+                    </div>
+                    <div className="flex items-stretch gap-3 overflow-x-auto pb-1.5">
+                      {tmdbEnrichment.animeExtras.characters.map((ch) => (
+                        <div
+                          key={`mal-char-${ch.malId}-${ch.name}`}
+                          className="flex items-center gap-2.5 px-3 py-2 rounded-2xl bg-sky-500/[0.08] border border-sky-300/20 backdrop-blur-md shrink-0 max-w-[260px]"
+                        >
+                          {ch.imageUrl ? (
+                            <img
+                              src={ch.imageUrl}
+                              alt={ch.name}
+                              className="w-10 h-10 rounded-full object-cover border border-sky-300/40 shrink-0"
+                              referrerPolicy="no-referrer"
+                            />
+                          ) : (
+                            <div className="w-10 h-10 rounded-full bg-sky-500/25 flex items-center justify-center text-xs font-black text-sky-100 shrink-0">
+                              {ch.name.slice(0, 1)}
+                            </div>
+                          )}
+                          <div className="min-w-0">
+                            <div className="text-xs font-bold text-white truncate">{ch.name}</div>
+                            {ch.voiceActorName && (
+                              <div className="text-[10px] text-sky-200/80 truncate">
+                                أداء: {ch.voiceActorName}
+                              </div>
+                            )}
+                          </div>
+                          {ch.voiceActorImage && (
+                            <img
+                              src={ch.voiceActorImage}
+                              alt={ch.voiceActorName || ch.name}
+                              className="w-8 h-8 rounded-full object-cover border border-white/25 shrink-0"
+                              referrerPolicy="no-referrer"
+                            />
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
             </div>
           </div>
 
@@ -461,6 +620,17 @@ export const DubSeriesDetailModal: React.FC<DubSeriesDetailModalProps> = ({
                               <span className="inline-flex items-center gap-1 text-white/70 tabular-nums">
                                 <Calendar className="w-3.5 h-3.5 text-sky-300" />
                                 <span>{inspectedResolved.releaseDate}</span>
+                              </span>
+                            </>
+                          )}
+                          {inspectedResolved.imdbRating && (
+                            <>
+                              <span aria-hidden="true">·</span>
+                              <span
+                                className="inline-flex items-center gap-1 text-amber-300 font-bold tabular-nums"
+                                dir="ltr"
+                              >
+                                IMDb ★ {inspectedResolved.imdbRating}
                               </span>
                             </>
                           )}

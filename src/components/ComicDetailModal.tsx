@@ -1,7 +1,8 @@
-import React from 'react';
-import { X, BookOpen, Heart, Layers, Star } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { X, BookOpen, Heart, Layers, Star, Sparkles } from 'lucide-react';
 import { Comic, ComicChapter } from '../data/mockData.ts';
 import { useFavorites } from '../utils/favorites';
+import { ComicEnrichmentResult, fetchComicEnrichment } from '../utils/tmdbMetadata';
 
 interface ComicDetailModalProps {
   comic: Comic;
@@ -15,7 +16,25 @@ export const ComicDetailModal: React.FC<ComicDetailModalProps> = ({
   onReadChapter,
 }) => {
   const { isFavorite, toggleFavorite } = useFavorites();
+  const [comicEnrichment, setComicEnrichment] = useState<ComicEnrichmentResult | null>(null);
   const favorited = isFavorite(comic.id);
+
+  useEffect(() => {
+    let cancelled = false;
+    setComicEnrichment(null);
+    void fetchComicEnrichment({
+      id: comic.id,
+      title: comic.title,
+      originalTitle: comic.originalTitle,
+    }).then((res) => {
+      if (!cancelled && res?.found) {
+        setComicEnrichment(res);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [comic.id, comic.title, comic.originalTitle]);
 
   return (
     <div
@@ -56,9 +75,22 @@ export const ComicDetailModal: React.FC<ComicDetailModalProps> = ({
             </div>
 
             <div className="relative z-10 flex items-center justify-between gap-4 px-5 sm:px-8 py-4 border-b border-white/10 bg-white/[0.03] backdrop-blur-md">
-              <span className="text-xs text-white/80 font-medium truncate">
-                {comic.arabicPublisher}
-              </span>
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="text-xs text-white/80 font-medium truncate">
+                  {comic.arabicPublisher}
+                </span>
+                {comicEnrichment?.found && comicEnrichment.sourcesUsed && (
+                  <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-bold text-emerald-300 bg-emerald-500/15 border border-emerald-400/30 px-2.5 py-0.5 rounded-full shrink-0">
+                    <Sparkles className="w-3 h-3" />
+                    <span>
+                      متزامن:{' '}
+                      {comicEnrichment.sourcesUsed
+                        .map((s) => (s === 'mangadex' ? 'MangaDex' : 'ComicVine'))
+                        .join(' + ')}
+                    </span>
+                  </span>
+                )}
+              </div>
               <button
                 type="button"
                 onClick={onClose}
@@ -91,6 +123,31 @@ export const ComicDetailModal: React.FC<ComicDetailModalProps> = ({
                     <p className="text-xs font-mono text-white/55" dir="ltr">
                       {comic.originalTitle}
                     </p>
+                    {comicEnrichment?.found &&
+                      (comicEnrichment.mangadexRating ||
+                        comicEnrichment.year ||
+                        comicEnrichment.issuesCount) && (
+                        <div className="flex flex-wrap items-center gap-2 pt-1 text-[11px] font-bold">
+                          {comicEnrichment.mangadexRating && (
+                            <span
+                              className="px-2.5 py-1 rounded-lg bg-orange-500/15 border border-orange-400/35 text-orange-200 tabular-nums"
+                              dir="ltr"
+                            >
+                              MangaDex ★ {comicEnrichment.mangadexRating}
+                            </span>
+                          )}
+                          {comicEnrichment.year && (
+                            <span className="px-2.5 py-1 rounded-lg bg-white/10 border border-white/20 text-white/85 tabular-nums">
+                              سنة الإصدار: {comicEnrichment.year}
+                            </span>
+                          )}
+                          {comicEnrichment.issuesCount && (
+                            <span className="px-2.5 py-1 rounded-lg bg-violet-500/15 border border-violet-300/30 text-violet-200 tabular-nums">
+                              عدد الإصدارات الأصلية: {comicEnrichment.issuesCount}
+                            </span>
+                          )}
+                        </div>
+                      )}
                   </div>
 
                   <p className="text-xs sm:text-sm text-white/85 leading-relaxed max-w-2xl">

@@ -186,6 +186,13 @@ export interface SaveEpisodeResult {
   cloudError?: string;
 }
 
+export interface BatchSaveEpisodeResult {
+  savedToServer: boolean;
+  cloudSavedCount: number;
+  cloudFailedCount: number;
+  cloudError?: string;
+}
+
 export interface ResolvedServerOption {
   id: string;
   label: string;
@@ -621,6 +628,108 @@ export async function saveCustomEpisodeSource(
   }
 
   return { savedToServer, savedToCloud, cloudError };
+}
+
+export async function saveCustomEpisodeSourcesBatch(
+  entries: Array<{ episodeId: string; config: CustomEpisodeConfig }>,
+  onProgress?: (done: number, total: number) => void
+): Promise<BatchSaveEpisodeResult> {
+  if (typeof window === 'undefined' || entries.length === 0) {
+    return { savedToServer: false, cloudSavedCount: 0, cloudFailedCount: 0 };
+  }
+
+  const nowIso = new Date().toISOString();
+  const existingAll = getAllCustomEpisodeSources();
+  const sanitizedMap: Record<string, CustomEpisodeConfig> = {};
+  const validItems: Array<{ episodeId: string; config: CustomEpisodeConfig }> = [];
+
+  for (const item of entries) {
+    const cleanId = String(item.episodeId || '')
+      .replace(/[^a-zA-Z0-9_-]/g, '-')
+      .slice(0, 120);
+    if (!cleanId || !EPISODE_ID_PATTERN.test(cleanId)) continue;
+    const sanitized = sanitizeEpisodeConfigForBlueprint({
+      ...existingAll[cleanId],
+      ...item.config,
+      updatedAt: nowIso,
+    });
+    sanitizedMap[cleanId] = sanitized;
+    validItems.push({ episodeId: cleanId, config: sanitized });
+  }
+
+  if (validItems.length === 0) {
+    return { savedToServer: false, cloudSavedCount: 0, cloudFailedCount: 0 };
+  }
+
+  inMemorySources = {
+    ...existingAll,
+    ...sanitizedMap,
+  };
+  writeLocalStorageSources(inMemorySources);
+  window.dispatchEvent(new CustomEvent(SOURCES_UPDATED_EVENT, { detail: { batch: true } }));
+
+  let savedToServer = false;
+  try {
+    const res = await fetch('/api/episode-sources/bulk/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'merge', sources: sanitizedMap }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.sources) {
+        inMemorySources = { ...data.sources, ...sanitizedMap };
+        writeLocalStorageSources(inMemorySources);
+      }
+      savedToServer = true;
+    }
+  } catch (e) {
+    console.error('Failed to persist batch episode sources to server:', e);
+  }
+
+  if (!auth.currentUser || !isVerifiedAdminUser(auth.currentUser)) {
+    return {
+      savedToServer,
+      cloudSavedCount: 0,
+      cloudFailedCount: validItems.length,
+      cloudError: 'ADMIN_AUTH_REQUIRED',
+    };
+  }
+
+  let cloudSavedCount = 0;
+  let cloudFailedCount = 0;
+  let firstCloudError: string | undefined;
+
+  const CHUNK_SIZE = 8;
+  for (let i = 0; i < validItems.length; i += CHUNK_SIZE) {
+    const chunk = validItems.slice(i, i + CHUNK_SIZE);
+    const settled = await Promise.allSettled(
+      chunk.map((entry) => upsertEpisodeSourceInCloud(entry.episodeId, entry.config))
+    );
+    for (const outcome of settled) {
+      if (outcome.status === 'fulfilled') {
+        cloudSavedCount += 1;
+      } else {
+        cloudFailedCount += 1;
+        if (!firstCloudError) {
+          firstCloudError =
+            outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
+        }
+      }
+    }
+    onProgress?.(Math.min(validItems.length, i + chunk.length), validItems.length);
+  }
+
+  if (cloudSavedCount > 0) {
+    window.dispatchEvent(new CustomEvent(SOURCES_UPDATED_EVENT, { detail: { cloudSynced: true } }));
+  }
+
+  return {
+    savedToServer,
+    cloudSavedCount,
+    cloudFailedCount,
+    cloudError: firstCloudError,
+  };
 }
 
 export async function removeCustomEpisodeSource(episodeId: string): Promise<boolean> {

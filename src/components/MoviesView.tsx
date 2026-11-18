@@ -34,6 +34,7 @@ export const MoviesView: React.FC<MoviesViewProps> = ({
   onPlayEpisode,
   onOpenAdmin,
   isOwnerAdmin = false,
+  onOpenCreateWork,
 }) => {
   const [selectedMovieId, setSelectedMovieId] = useState<string>(MOVIES_WORKS[0]?.id || '');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -63,13 +64,24 @@ export const MoviesView: React.FC<MoviesViewProps> = ({
           يمكن للمشرف إضافة فيلم جديد أو استعادة الأفلام المحذوفة من لوحة تحكم المشرف.
         </p>
         {isOwnerAdmin && (
-          <button
-            onClick={onOpenAdmin}
-            className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-neutral-950 rounded-xl text-xs font-black inline-flex items-center gap-2 cursor-pointer"
-          >
-            <ShieldCheck className="w-4 h-4" />
-            <span>فتح لوحة المشرف</span>
-          </button>
+          <div className="flex flex-wrap items-center justify-center gap-2.5">
+            {onOpenCreateWork && (
+              <button
+                onClick={onOpenCreateWork}
+                className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-neutral-950 rounded-xl text-xs font-black inline-flex items-center gap-2 cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>إضافة فيلم بفيديو مباشر</span>
+              </button>
+            )}
+            <button
+              onClick={onOpenAdmin}
+              className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-white rounded-xl text-xs font-bold inline-flex items-center gap-2 cursor-pointer"
+            >
+              <ShieldCheck className="w-4 h-4 text-amber-400" />
+              <span>فتح لوحة المشرف</span>
+            </button>
+          </div>
         )}
       </div>
     );
@@ -129,13 +141,23 @@ export const MoviesView: React.FC<MoviesViewProps> = ({
             />
           </div>
 
+          {isOwnerAdmin && onOpenCreateWork && (
+            <button
+              onClick={onOpenCreateWork}
+              className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-neutral-950 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-colors cursor-pointer shrink-0 shadow"
+            >
+              <Plus className="w-4 h-4" />
+              <span>إضافة فيلم بفيديو مباشر</span>
+            </button>
+          )}
+
           {isOwnerAdmin && (
             <button
               onClick={onOpenAdmin}
               className="px-3.5 py-2.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-800 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
             >
               <ShieldCheck className="w-4 h-4 text-amber-500" />
-              <span>إدارة الأفلام والروابط (لوحة المشرف)</span>
+              <span>إدارة الأفلام والروابط</span>
             </button>
           )}
         </div>
